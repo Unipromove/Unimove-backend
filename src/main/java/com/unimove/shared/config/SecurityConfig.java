@@ -49,6 +49,9 @@ public class SecurityConfig {
                                 // e a assinatura HMAC do payload, conferida no proprio controller.
                                 "/webhooks/whatsapp",
                                 "/share/**",
+                                // Arquivo de documento do motorista: a autorizacao e a URL
+                                // assinada de vida curta emitida ao admin (DocumentUrlSigner).
+                                "/files/documents/**",
                                 // Lista de cidades atendidas: o app precisa dela
                                 // para montar o seletor da tela de cadastro,
                                 // antes de existir qualquer token.

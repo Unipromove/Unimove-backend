@@ -1,23 +1,20 @@
 package com.unimove.domain.user.document;
 
-import io.netty.channel.ChannelOption;
+import com.unimove.shared.security.FieldCrypto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.web.reactive.function.client.ExchangeStrategies;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.netty.http.client.HttpClient;
 
-import java.time.Duration;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Sem {@code app.storage.supabase.url}/{@code service-key} o storage nasce
- * "indisponivel": dev e testes sobem sem credencial e o upload responde 503,
- * mesma estrategia do login social.
+ * Sem {@code app.storage.documents.dir} o storage nasce "indisponivel": dev e
+ * testes sobem sem diretorio e o upload responde 503, mesma estrategia do
+ * login social.
  */
 @Configuration
 @EnableConfigurationProperties(DocumentStorageProperties.class)
@@ -26,24 +23,12 @@ class DocumentStorageConfig {
     private static final Logger log = LoggerFactory.getLogger(DocumentStorageConfig.class);
 
     @Bean
-    DocumentStorage documentStorage(DocumentStorageProperties props) {
+    DocumentStorage documentStorage(DocumentStorageProperties props, FieldCrypto crypto) {
         if (!props.configured()) {
-            log.warn("Storage de documentos nao configurado (app.storage.supabase.*): upload de documentos respondera 503.");
+            log.warn("Storage de documentos nao configurado (app.storage.documents.dir): upload de documentos respondera 503.");
             return new UnavailableDocumentStorage();
         }
-        HttpClient httpClient = HttpClient.create()
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5_000)
-                .responseTimeout(Duration.ofSeconds(20));
-        int maxInMemory = (int) Math.min(Integer.MAX_VALUE, props.maxFileBytes() + 64 * 1024);
-        WebClient client = WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .exchangeStrategies(ExchangeStrategies.builder()
-                        .codecs(c -> c.defaultCodecs().maxInMemorySize(maxInMemory))
-                        .build())
-                .defaultHeader("Authorization", "Bearer " + props.serviceKey())
-                .defaultHeader("apikey", props.serviceKey())
-                .build();
-        return new SupabaseDocumentStorage(client, props.url(), props.bucket());
+        return new LocalDocumentStorage(Path.of(props.dir()), crypto);
     }
 
     static final class UnavailableDocumentStorage implements DocumentStorage {
@@ -53,7 +38,7 @@ class DocumentStorageConfig {
         }
 
         @Override
-        public SignedUrl signedUrl(String path, Duration ttl) {
+        public Optional<byte[]> read(String path) {
             throw new DocumentStorageUnavailableException();
         }
 

@@ -6,24 +6,22 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * Supabase Storage dos documentos de motorista.
+ * Documentos de motorista em disco local, cifrados (ver {@link LocalDocumentStorage}).
  *
- * @param url                  URL do projeto (https://&lt;ref&gt;.supabase.co). Vazio desliga o upload (503).
- * @param serviceKey           chave service_role — so no backend, nunca no app.
- * @param bucket               bucket PRIVADO (criar sem "public").
+ * @param dir                  diretorio raiz (volume Docker em prod). Vazio desliga o upload (503).
+ * @param publicBaseUrl        prefixo da URL assinada (https://dominio). Vazio = URL relativa.
  * @param signedUrlTtlSeconds  vida da URL assinada entregue ao admin.
  * @param maxFileBytes         teto por arquivo.
  */
 @Validated
-@ConfigurationProperties(prefix = "app.storage.supabase")
+@ConfigurationProperties(prefix = "app.storage.documents")
 public record DocumentStorageProperties(
-        @DefaultValue("") String url,
-        @DefaultValue("") String serviceKey,
-        @DefaultValue("driver-documents") String bucket,
+        @DefaultValue("") String dir,
+        @DefaultValue("") String publicBaseUrl,
         @DefaultValue("300") @Positive long signedUrlTtlSeconds,
         @DefaultValue("5242880") @Positive long maxFileBytes
 ) {
     public boolean configured() {
-        return !url.isBlank() && !serviceKey.isBlank();
+        return !dir.isBlank();
     }
 }

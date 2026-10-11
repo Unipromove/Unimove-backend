@@ -54,6 +54,7 @@ class DriverDocumentServiceTest {
     @Mock DocumentStorage storage;
     @Mock AdminAuditLog auditLog;
     @Mock FieldCrypto crypto;
+    @Mock DocumentUrlSigner urlSigner;
 
     private DriverDocumentService service;
     private Driver driver;
@@ -64,8 +65,8 @@ class DriverDocumentServiceTest {
     @BeforeEach
     void setUp() {
         service = new DriverDocumentService(driverRepository, documentRepository, storage,
-                new DocumentStorageProperties("https://x.supabase.co", "key", "driver-documents", 300, 1024),
-                auditLog, crypto, Clock.fixed(NOW, ZoneOffset.UTC));
+                new DocumentStorageProperties("/data/documents", "https://api.x", 300, 1024),
+                urlSigner, auditLog, crypto, Clock.fixed(NOW, ZoneOffset.UTC));
         driverId = UUID.randomUUID();
         driver = new Driver();
         driver.setId(driverId);
@@ -457,8 +458,8 @@ class DriverDocumentServiceTest {
     void fileUrlIsAudited() {
         DriverDocument d = doc(DriverDocumentType.SELFIE, DriverDocumentStatus.SUBMITTED);
         when(documentRepository.findByIdAndDriverId(d.getId(), driverId)).thenReturn(Optional.of(d));
-        when(storage.signedUrl(d.getStoragePath(), Duration.ofSeconds(300)))
-                .thenReturn(new DocumentStorage.SignedUrl("https://signed", NOW.plusSeconds(300)));
+        when(urlSigner.sign(d.getStoragePath(), Duration.ofSeconds(300)))
+                .thenReturn(new DocumentUrlSigner.SignedUrl("https://signed", NOW.plusSeconds(300)));
 
         DocumentFileUrlResponse resp = service.fileUrl(driverId, d.getId(), adminId);
 
@@ -475,7 +476,7 @@ class DriverDocumentServiceTest {
 
         assertThatThrownBy(() -> service.fileUrl(driverId, docId, adminId))
                 .isInstanceOf(DriverDocumentNotFoundException.class);
-        verifyNoInteractions(auditLog, storage);
+        verifyNoInteractions(auditLog, storage, urlSigner);
     }
 
     @Test

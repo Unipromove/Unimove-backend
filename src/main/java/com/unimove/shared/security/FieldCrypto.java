@@ -72,17 +72,7 @@ public class FieldCrypto {
         if (plain == null) {
             return null;
         }
-        try {
-            byte[] iv = new byte[IV_BYTES];
-            random.nextBytes(iv);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(TAG_BITS, iv));
-            byte[] ct = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
-            return PREFIX + Base64.getEncoder().encodeToString(ByteBuffer.allocate(iv.length + ct.length)
-                    .put(iv).put(ct).array());
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("Falha ao cifrar campo", e);
-        }
+        return PREFIX + Base64.getEncoder().encodeToString(encryptBytes(plain.getBytes(StandardCharsets.UTF_8)));
     }
 
     /** Valor sem o prefixo e legado em claro (gravado antes da V31): devolvido como esta. */
@@ -92,11 +82,37 @@ public class FieldCrypto {
         }
         try {
             byte[] raw = Base64.getDecoder().decode(stored.substring(PREFIX.length()));
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, aesKey, new GCMParameterSpec(TAG_BITS, raw, 0, IV_BYTES));
-            return new String(cipher.doFinal(raw, IV_BYTES, raw.length - IV_BYTES), StandardCharsets.UTF_8);
-        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            return new String(decryptBytes(raw), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
             throw new IllegalStateException("Falha ao decifrar campo (chave trocada?)", e);
+        }
+    }
+
+    /** AES-256-GCM binario: devolve {@code IV || texto cifrado + tag}. Usado tambem nos arquivos de documento. */
+    public byte[] encryptBytes(byte[] plain) {
+        try {
+            byte[] iv = new byte[IV_BYTES];
+            random.nextBytes(iv);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(TAG_BITS, iv));
+            byte[] ct = cipher.doFinal(plain);
+            return ByteBuffer.allocate(iv.length + ct.length).put(iv).put(ct).array();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Falha ao cifrar", e);
+        }
+    }
+
+    /** Inverso de {@link #encryptBytes}. Conteudo adulterado ou chave trocada falham na tag do GCM. */
+    public byte[] decryptBytes(byte[] stored) {
+        try {
+            if (stored.length < IV_BYTES) {
+                throw new GeneralSecurityException("conteudo cifrado truncado");
+            }
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, aesKey, new GCMParameterSpec(TAG_BITS, stored, 0, IV_BYTES));
+            return cipher.doFinal(stored, IV_BYTES, stored.length - IV_BYTES);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Falha ao decifrar (chave trocada?)", e);
         }
     }
 

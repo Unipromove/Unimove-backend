@@ -20,7 +20,7 @@ spring:
   datasource:
     password: ${DATABASE_PASSWORD}
     hikari:
-      # Postgres local (max_connections=100), sem o teto do pooler do Supabase.
+      # Postgres local na mesma stack (max_connections=100).
       # 10 e o default do Hikari e sobra para o piloto; ajuste por env var.
       maximum-pool-size: ${DB_POOL_SIZE:10}
       minimum-idle: 1
