@@ -1,5 +1,9 @@
 # Deploy — Render (API) + Supabase (Postgres)
 
+> **Legado.** A producao migrou para uma VPS Hetzner: ver
+> [`deploy-vps.md`](./deploy-vps.md). Este documento fica como registro do alvo
+> anterior e do passo a passo do Supabase (o Storage dos documentos continua la).
+
 Push na `main` → testes → imagem no GHCR → o Render puxa e sobe. Custo: **R$ 0**.
 
 ```
