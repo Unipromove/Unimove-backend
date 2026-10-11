@@ -1,0 +1,43 @@
+package com.unimove.domain.user.dto;
+
+import com.unimove.domain.user.Role;
+import com.unimove.domain.user.VehicleType;
+import com.unimove.shared.util.VehiclePlate;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
+/**
+ * Nao ha campo {@code phone}: o telefone da conta vem do desafio verificado no
+ * WhatsApp (o wa_id que a Meta entrega), nunca do formulario. E o que impede
+ * alguem de cadastrar o numero de outra pessoa.
+ */
+public record RegisterRequest(
+        @Email @NotBlank String email,
+        @NotBlank @Size(min = 8, max = 72) String password,
+        @NotBlank @Size(max = 120) String name,
+        @NotBlank @Size(max = 64) String verificationToken,
+        @NotNull Role role,
+        @NotBlank @Size(max = 80) String cidade,
+        VehicleType vehicleType,
+        @Pattern(regexp = VehiclePlate.PATTERN, message = VehiclePlate.MESSAGE) String vehiclePlate,
+        /** Versao dos termos/politica aceita na tela de cadastro (GET /legal/terms). */
+        @NotBlank @Size(max = 20) String termsVersion
+) {
+    @AssertTrue(message = "Cadastro permitido apenas para PASSAGEIRO ou MOTORISTA.")
+    public boolean isRoleSelfRegisterable() {
+        return role != Role.ADMIN;
+    }
+
+    @AssertTrue(message = "Motorista deve informar vehicleType e vehiclePlate; outros papéis não devem.")
+    public boolean isVehicleConsistent() {
+        boolean isDriver = role == Role.MOTORISTA;
+        boolean hasVehicle = vehicleType != null
+                && vehiclePlate != null
+                && !vehiclePlate.isBlank();
+        return isDriver == hasVehicle;
+    }
+}

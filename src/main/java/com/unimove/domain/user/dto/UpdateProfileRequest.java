@@ -1,0 +1,16 @@
+package com.unimove.domain.user.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+/**
+ * Campos editáveis do perfil. E-mail (login) e role são imutáveis no MVP.
+ *
+ * O telefone também fica fora: ele foi verificado no WhatsApp, e só muda por um
+ * novo desafio em PUT /users/me/phone.
+ */
+public record UpdateProfileRequest(
+        @NotBlank @Size(max = 120) String name,
+        @NotBlank @Size(max = 80) String cidade
+) {
+}

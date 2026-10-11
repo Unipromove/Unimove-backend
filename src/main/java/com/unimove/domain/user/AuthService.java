@@ -1,0 +1,144 @@
+package com.unimove.domain.user;
+
+import com.unimove.domain.city.CityCatalog;
+import com.unimove.domain.user.dto.AuthResponse;
+import com.unimove.domain.user.dto.LoginRequest;
+import com.unimove.domain.user.dto.RegisterRequest;
+import com.unimove.domain.verification.PhoneVerificationService;
+import com.unimove.shared.security.JwtService;
+import com.unimove.shared.util.CityNormalizer;
+import com.unimove.shared.util.VehiclePlate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+
+@Service
+public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
+    private final UserRepository userRepository;
+    private final DriverRepository driverRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final LoginAttemptService loginAttemptService;
+    private final PhoneVerificationService phoneVerificationService;
+    private final CityCatalog cityCatalog;
+    private final PrivacyProperties privacy;
+    private final Clock clock;
+
+    public AuthService(UserRepository userRepository,
+                       DriverRepository driverRepository,
+                       PasswordEncoder passwordEncoder,
+                       JwtService jwtService,
+                       LoginAttemptService loginAttemptService,
+                       PhoneVerificationService phoneVerificationService,
+                       CityCatalog cityCatalog,
+                       PrivacyProperties privacy,
+                       Clock clock) {
+        this.userRepository = userRepository;
+        this.driverRepository = driverRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.loginAttemptService = loginAttemptService;
+        this.phoneVerificationService = phoneVerificationService;
+        this.cityCatalog = cityCatalog;
+        this.privacy = privacy;
+        this.clock = clock;
+    }
+
+    @Transactional
+    public AuthResponse register(RegisterRequest req) {
+        if (req.role() == Role.ADMIN) {
+            log.warn("Tentativa de auto-cadastro como ADMIN bloqueada: email={}", req.email());
+            throw new RoleNotSelfAssignableException();
+        }
+
+        String email = req.email().trim().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new EmailAlreadyUsedException();
+        }
+
+        String cidade = CityNormalizer.normalize(req.cidade());
+        if (cidade.isEmpty()) {
+            throw new InvalidCityException();
+        }
+        // Antes de consumir o token do WhatsApp: falhar aqui devolve o desafio
+        // no rollback, mas nao ha razao para gastar o token com um cadastro que
+        // ja sabemos invalido.
+        cityCatalog.assertServed(cidade);
+        // Tambem antes do WhatsApp: sem consentimento nao ha cadastro.
+        if (!privacy.termsVersion().equals(req.termsVersion())) {
+            throw new TermsNotAcceptedException(privacy.termsVersion());
+        }
+
+        // O telefone vem do desafio verificado (wa_id entregue pela Meta), nunca
+        // do formulario. Roda dentro desta transacao de proposito: se o cadastro
+        // falhar adiante, o rollback devolve o token e o usuario corrige o
+        // formulario sem precisar verificar de novo.
+        String verifiedPhone = phoneVerificationService.consumeVerifiedPhone(req.verificationToken());
+
+        User user = new User();
+        user.setTermsVersion(req.termsVersion());
+        user.setTermsAcceptedAt(clock.instant());
+        user.setEmail(email);
+        user.setPasswordHash(passwordEncoder.encode(req.password()));
+        user.setName(req.name().trim());
+        user.setPhone(verifiedPhone);
+        user.setPhoneVerifiedAt(clock.instant());
+        user.setRole(req.role());
+        user.setCidade(cidade);
+        userRepository.save(user);
+
+        if (req.role() == Role.MOTORISTA) {
+            Driver driver = new Driver();
+            driver.setUser(user);
+            driver.setApproved(false);
+            driver.setOnline(false);
+            driver.setVehicleType(req.vehicleType());
+            driver.setVehiclePlate(VehiclePlate.normalize(req.vehiclePlate()));
+            driverRepository.save(driver);
+        }
+
+        log.info("Novo cadastro: userId={}, role={}, cidade={}", user.getId(), user.getRole(), user.getCidade());
+        return issueToken(user);
+    }
+
+    @Transactional(readOnly = true)
+    public AuthResponse login(LoginRequest req) {
+        return issueToken(authenticate(req.email(), req.password()));
+    }
+
+    /**
+     * Confere e-mail/senha com o lockout por tentativas e exige conta ativa.
+     * Compartilhado pelo login do app e pelo login da documentacao (Swagger).
+     */
+    @Transactional(readOnly = true)
+    public User authenticate(String rawEmail, String password) {
+        String email = rawEmail.trim().toLowerCase();
+        loginAttemptService.assertNotLocked(email);
+        User user = userRepository.findByEmail(email).orElse(null);
+        // Conta criada por login social nao tem senha. O erro e o mesmo de
+        // credencial errada de proposito: dizer "esta conta usa Google" seria
+        // enumeracao de usuario.
+        boolean hasPassword = user != null && user.getPasswordHash() != null;
+        if (!hasPassword || !passwordEncoder.matches(password, user.getPasswordHash())) {
+            loginAttemptService.recordFailure(email);
+            throw new BadCredentialsException("Credenciais inválidas");
+        }
+        loginAttemptService.recordSuccess(email);
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new UserSuspendedException();
+        }
+        return user;
+    }
+
+    private AuthResponse issueToken(User user) {
+        return AuthResponse.of(user, jwtService.generate(user));
+    }
+}

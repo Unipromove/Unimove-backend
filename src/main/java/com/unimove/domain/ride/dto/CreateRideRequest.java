@@ -1,0 +1,76 @@
+package com.unimove.domain.ride.dto;
+
+import com.unimove.domain.ride.RideCategory;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+public record CreateRideRequest(
+        @NotNull
+        @DecimalMin(value = "-90.0")
+        @DecimalMax(value = "90.0")
+        BigDecimal latOrigem,
+
+        @NotNull
+        @DecimalMin(value = "-180.0")
+        @DecimalMax(value = "180.0")
+        BigDecimal lngOrigem,
+
+        @NotNull
+        @DecimalMin(value = "-90.0")
+        @DecimalMax(value = "90.0")
+        BigDecimal latDestino,
+
+        @NotNull
+        @DecimalMin(value = "-180.0")
+        @DecimalMax(value = "180.0")
+        BigDecimal lngDestino,
+
+        RideCategory category,
+
+        // Texto do endereco (opcional) resolvido pelo app via geocoding — persistido
+        // para alimentar os destinos recentes (estilo Uber). Coordenadas continuam
+        // sendo a fonte de verdade da rota/preco.
+        @Size(max = 200)
+        String origemEndereco,
+
+        @Size(max = 200)
+        String destinoEndereco,
+
+        @Valid
+        @Size(max = 5, message = "Maximo de 5 paradas intermediarias.")
+        List<StopPoint> stops,
+
+        // Preco que o passageiro viu na estimativa. Se o recalculado divergir
+        // (surge mudou), o pedido volta 409 em vez de cobrar outro valor.
+        @DecimalMin(value = "0.0")
+        BigDecimal expectedPrice
+) {
+    public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
+                             BigDecimal latDestino, BigDecimal lngDestino,
+                             RideCategory category, String origemEndereco, String destinoEndereco,
+                             List<StopPoint> stops) {
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, origemEndereco, destinoEndereco, stops, null);
+    }
+
+    public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
+                             BigDecimal latDestino, BigDecimal lngDestino) {
+        this(latOrigem, lngOrigem, latDestino, lngDestino, null, null, null, null, null);
+    }
+
+    public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
+                             BigDecimal latDestino, BigDecimal lngDestino, RideCategory category) {
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, null, null);
+    }
+
+    public CreateRideRequest(BigDecimal latOrigem, BigDecimal lngOrigem,
+                             BigDecimal latDestino, BigDecimal lngDestino,
+                             RideCategory category, List<StopPoint> stops) {
+        this(latOrigem, lngOrigem, latDestino, lngDestino, category, null, null, stops, null);
+    }
+}

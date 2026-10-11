@@ -1,0 +1,458 @@
+### UniMove — Coleção HTTP versionada
+### Compatível com IntelliJ HTTP Client e VSCode REST Client.
+### Variaveis @ guardam tokens entre requests. Substitua {{rideId}} e {{driverId}} conforme necessario.
+
+@host = http://localhost:8080
+@passageiroToken =
+@motoristaToken =
+@adminToken =
+@rideId =
+@driverId =
+@challengeId =
+@challengeCode =
+@verificationToken =
+
+###############################################################
+# 0. VERIFICACAO DE TELEFONE (obrigatoria antes de cadastrar)
+###############################################################
+# Fluxo reverso: quem envia a mensagem e o USUARIO, nao o backend. Por isso
+# custa R$0 na Cloud API — so template enviado pela empresa e cobrado.
+#
+# PARA DESENVOLVER NAO E PRECISO CONFIGURAR NADA: channel=LOG e o default,
+# entao basta `docker compose up -d postgres` + `./mvnw spring-boot:run`.
+# O passo 0.2 abaixo faz o papel da Meta (em LOG a assinatura nao e exigida),
+# e o backend nao distingue esse POST de uma entrega real.
+# Contexto completo — inclusive como ligar o WhatsApp de verdade — em
+# docs/verificacao-telefone.md
+
+### 0.1 Criar desafio (publico, sem body)
+# @name challengePassageiro
+POST {{host}}/auth/phone/challenge
+
+> {%
+    client.global.set("challengeId", response.body.challengeId);
+    client.global.set("challengeCode", response.body.code);
+%}
+
+### 0.2 Simular a Meta entregando a mensagem do usuario
+# Em producao quem chama isto e a Meta, com X-Hub-Signature-256 assinado.
+# O telefone da conta vem do campo "from" — nunca de um campo do formulario.
+POST {{host}}/webhooks/whatsapp
+Content-Type: application/json
+
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "changes": [{
+      "value": {
+        "messages": [{
+          "from": "5517999990001",
+          "type": "text",
+          "text": { "body": "UNIMOVE-{{challengeCode}}" }
+        }]
+      }
+    }]
+  }]
+}
+
+### 0.3 Polling do status (app chama a cada ~2s ate sair de PENDING)
+# @name challengeStatus
+GET {{host}}/auth/phone/challenge/{{challengeId}}
+
+> {% client.global.set("verificationToken", response.body.verificationToken); %}
+
+###############################################################
+# 1. AUTH
+###############################################################
+
+### 1.1 Registrar passageiro (exige o token do passo 0.3)
+# @name registerPassageiro
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "passageiro1@unimove.local",
+  "password": "senha12345",
+  "name": "Passageiro Um",
+  "verificationToken": "{{verificationToken}}",
+  "role": "PASSAGEIRO",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+> {% client.global.set("passageiroToken", response.body.token); %}
+
+### 1.2 Registrar motorista (vai entrar como approved=false)
+# Refaca 0.1 -> 0.2 (com outro "from") -> 0.3 antes deste passo: cada conta
+# precisa do proprio telefone verificado, e o token e de uso unico.
+# @name registerMotorista
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "motorista1@unimove.local",
+  "password": "senha12345",
+  "name": "Motorista Um",
+  "verificationToken": "{{verificationToken}}",
+  "role": "MOTORISTA",
+  "cidade": "sao-jose-do-rio-preto",
+  "vehicleType": "MOTO",
+  "vehiclePlate": "ABC1D23"
+}
+
+> {% client.global.set("motoristaToken", response.body.token); %}
+
+### 1.2b Auto-cadastro como ADMIN e' rejeitado (esperado: 400 "Dados invalidos")
+# Escalacao de privilegio: nao ha como virar ADMIN pelo body. ADMIN so via seed/migration.
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "invasor@unimove.local",
+  "password": "senha12345",
+  "name": "Invasor",
+  "verificationToken": "{{verificationToken}}",
+  "role": "ADMIN",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+### 1.2c Cadastro sem verificacao de telefone (esperado: 400)
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "semtelefone@unimove.local",
+  "password": "senha12345",
+  "name": "Sem Telefone",
+  "role": "PASSAGEIRO",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+### 1.2d Reuso do mesmo verificationToken (esperado: 400 — uso unico)
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "reuso@unimove.local",
+  "password": "senha12345",
+  "name": "Reuso",
+  "verificationToken": "{{verificationToken}}",
+  "role": "PASSAGEIRO",
+  "cidade": "sao-jose-do-rio-preto"
+}
+
+### 1.3 Login admin (seed em V2__seed_admin.sql)
+# @name loginAdmin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@unimove.local",
+  "password": "admin123"
+}
+
+> {% client.global.set("adminToken", response.body.token); %}
+
+### 1.4 Login (caso ja exista cadastro)
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "passageiro1@unimove.local",
+  "password": "senha12345"
+}
+
+### 1.5 Login social — entrar com Google
+# O app faz o sign-in nativo e manda o id_token (NAO o access token).
+# Sem GOOGLE_LOGIN_ENABLED=true isto responde 503 — e o esperado em dev.
+# Resposta 200 discriminada:
+#   status=AUTHENTICATED        -> JWT em .auth
+#   status=REGISTRATION_REQUIRED -> primeiro acesso; siga para 0.1/0.2/0.3 e depois 1.6
+# @name socialLogin
+POST {{host}}/auth/social
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "COLE_O_ID_TOKEN_DO_APP_AQUI"
+}
+
+> {% if (response.body.auth) { client.global.set("passageiroToken", response.body.auth.token); } %}
+
+### 1.6 Login social — completar o primeiro acesso
+# Reenvia o MESMO idToken (revalidado aqui) + o verificationToken do passo 0.3.
+# O Google substitui a senha, nunca a verificacao do telefone: sem
+# verificationToken isto e 400. A conta nasce sem senha (hasPassword=false).
+POST {{host}}/auth/social/register
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "COLE_O_ID_TOKEN_DO_APP_AQUI",
+  "verificationToken": "{{verificationToken}}",
+  "role": "PASSAGEIRO",
+  "cidade": "Remanso"
+}
+
+### 1.7 Esqueci minha senha — desafio de recuperacao (publico)
+# Mesmo fluxo reverso do WhatsApp, mas o numero PRECISA ter conta: numero sem
+# conta volta REJECTED com PHONE_NOT_REGISTERED. Depois rode 0.2 com o "from"
+# do usuario (ex.: 5517999990001) e 0.3 para pegar o verificationToken.
+# O token de recuperacao nao serve para cadastro, e vice-versa (400).
+POST {{host}}/auth/phone/challenge
+Content-Type: application/json
+
+{ "purpose": "PASSWORD_RESET" }
+
+> {%
+    client.global.set("challengeId", response.body.challengeId);
+    client.global.set("challengeCode", response.body.code);
+%}
+
+### 1.8 Esqueci minha senha — definir a senha nova (esperado: 204)
+# Revoga as sessoes anteriores (401 nos tokens velhos). O app segue para 1.4.
+POST {{host}}/auth/password/reset
+Content-Type: application/json
+
+{
+  "verificationToken": "{{verificationToken}}",
+  "newPassword": "senhaNova123"
+}
+
+### 1.6b Login social sem verificacao de telefone (esperado: 400)
+POST {{host}}/auth/social/register
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "COLE_O_ID_TOKEN_DO_APP_AQUI",
+  "role": "PASSAGEIRO",
+  "cidade": "Remanso"
+}
+
+### 1.6c Token adulterado/expirado/de outro app (esperado: 401)
+POST {{host}}/auth/social
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "eyJhbGciOiJSUzI1NiJ9.payload-invalido.assinatura-invalida"
+}
+
+
+###############################################################
+# 2. ADMIN — aprovacao de motorista
+###############################################################
+
+### 2.1 Listar motoristas pendentes
+GET {{host}}/admin/drivers/pending
+Authorization: Bearer {{adminToken}}
+
+### 2.2 Aprovar motorista (cole o id do passo 2.1)
+POST {{host}}/admin/drivers/{{driverId}}/approve
+Authorization: Bearer {{adminToken}}
+
+### 2.3 Listar todas as corridas (paginado)
+GET {{host}}/admin/rides?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### 2.4 Painel de metricas (default ultimos 30 dias)
+GET {{host}}/admin/metrics
+Authorization: Bearer {{adminToken}}
+
+### 2.5 Painel de metricas com periodo explicito
+GET {{host}}/admin/metrics?from=2026-05-01&to=2026-05-31
+Authorization: Bearer {{adminToken}}
+
+### 2.6 Tarifa por cidade — listar
+GET {{host}}/admin/pricing
+Authorization: Bearer {{adminToken}}
+
+### 2.7 Tarifa + surge — upsert (liga surge com teto 1.5x para a cidade)
+PUT {{host}}/admin/pricing
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "cidade": "Remanso",
+  "category": "CARRO",
+  "base": 5.50,
+  "perKm": 2.10,
+  "perMin": 0.20,
+  "surgeEnabled": true,
+  "surgeCap": 1.50
+}
+
+### 2.8 Estimate — preco ja inclui surge; surgeMultiplier exposto por categoria
+# (chamar como PASSAGEIRO; ver campo surgeMultiplier no response e em cada option)
+POST {{host}}/rides/estimate
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "latOrigem": -9.6200, "lngOrigem": -42.0800,
+  "latDestino": -9.6300, "lngDestino": -42.0900
+}
+
+
+###############################################################
+# 3. MOTORISTA — status online/offline
+###############################################################
+
+### 3.1 Ficar online
+POST {{host}}/drivers/me/online
+Authorization: Bearer {{motoristaToken}}
+
+### 3.2 Ficar offline
+POST {{host}}/drivers/me/offline
+Authorization: Bearer {{motoristaToken}}
+
+
+###############################################################
+# 4. PASSAGEIRO — fluxo da corrida
+###############################################################
+
+### 4.1 Criar corrida (origem e destino em Sao Jose do Rio Preto)
+# @name createRide
+POST {{host}}/rides
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "latOrigem": -20.8113,
+  "lngOrigem": -49.3758,
+  "latDestino": -20.7969,
+  "lngDestino": -49.3589
+}
+
+> {% client.global.set("rideId", response.body.id); %}
+
+### 4.2 Confirmar pagamento — PIX: 409 no piloto so dinheiro (PAYMENT_PIX_ENABLED=false).
+# Com a flag ligada gera BR Code SIMULADO (paymentStatus=SIMULATED, nunca recebimento).
+POST {{host}}/rides/{{rideId}}/confirm-payment
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "method": "PIX"
+}
+
+### 4.3 Confirmar pagamento — Dinheiro
+POST {{host}}/rides/{{rideId}}/confirm-payment
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "method": "DINHEIRO"
+}
+
+### 4.4 Polling do passageiro (a cada 5s pelo app)
+GET {{host}}/rides/{{rideId}}
+Authorization: Bearer {{passageiroToken}}
+
+### 4.4b Link de compartilhamento (so o passageiro dono; 410 com a corrida encerrada)
+# Resposta: {"token":"...","path":"/share/{token}"} — abrir {{host}}{path} sem token.
+GET {{host}}/rides/{{rideId}}/share-link
+Authorization: Bearer {{passageiroToken}}
+
+### 4.4c Preferencias do pedido (PUT substitui: ausente = sem preferencia)
+PUT {{host}}/users/me/preferences
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "marketingOptIn": false,
+  "preferredPaymentMethod": "PIX",
+  "preferredCategory": "MOTO"
+}
+
+### 4.5 Cancelar (passageiro pode cancelar em PENDING_PAYMENT, AVAILABLE_IN_MURAL ou DRIVER_EN_ROUTE)
+POST {{host}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "reason": "Mudei de ideia"
+}
+
+
+###############################################################
+# 5. MOTORISTA — mural e ciclo de vida da corrida
+###############################################################
+
+### 5.1 Listar mural (filtrado por cidade do motorista; exige online + approved)
+GET {{host}}/rides/mural
+Authorization: Bearer {{motoristaToken}}
+
+### 5.2 Aceitar corrida (lock otimista; segundo motorista recebe 409)
+POST {{host}}/rides/{{rideId}}/accept
+Authorization: Bearer {{motoristaToken}}
+
+### 5.3 Atualizar localizacao do motorista (a cada ~10s entre DRIVER_EN_ROUTE e IN_PROGRESS)
+PUT {{host}}/rides/{{rideId}}/driver-location
+Authorization: Bearer {{motoristaToken}}
+Content-Type: application/json
+
+{
+  "lat": -20.8090,
+  "lng": -49.3720
+}
+
+### 5.4 Iniciar viagem (motorista chegou na origem)
+POST {{host}}/rides/{{rideId}}/start
+Authorization: Bearer {{motoristaToken}}
+
+### 5.5 Finalizar viagem (chegou no destino)
+POST {{host}}/rides/{{rideId}}/complete
+Authorization: Bearer {{motoristaToken}}
+
+### 5.6 Motorista cancela (somente em DRIVER_EN_ROUTE; reason obrigatorio)
+POST {{host}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{motoristaToken}}
+Content-Type: application/json
+
+{
+  "reason": "Pneu furou"
+}
+
+
+###############################################################
+# 6. CASOS DE ERRO (uteis para validar GlobalExceptionHandler)
+###############################################################
+
+### 6.1 Sem token (espera 401)
+GET {{host}}/rides/mural
+
+### 6.2 Role errada — passageiro tentando ver mural (espera 403)
+GET {{host}}/rides/mural
+Authorization: Bearer {{passageiroToken}}
+
+### 6.3 Validacao — lat invalida (espera 400)
+POST {{host}}/rides
+Authorization: Bearer {{passageiroToken}}
+Content-Type: application/json
+
+{
+  "latOrigem": 999,
+  "lngOrigem": -49.3758,
+  "latDestino": -20.7969,
+  "lngDestino": -49.3589
+}
+
+### 6.4 Ride inexistente (espera 404)
+GET {{host}}/rides/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{passageiroToken}}
+
+### 6.5 Transicao invalida — completar uma ride PENDING_PAYMENT (espera 409)
+POST {{host}}/rides/{{rideId}}/complete
+Authorization: Bearer {{motoristaToken}}
+
+
+###############################################################
+# 7. SWAGGER / OPENAPI
+###############################################################
+
+### 7.1 OpenAPI JSON
+GET {{host}}/v3/api-docs
+
+### 7.2 Swagger UI (abrir no navegador)
+GET {{host}}/swagger-ui.html
