@@ -1,0 +1,11 @@
+# Lessons
+
+- **Links de serviços externos mudam; não repasse o link do README de terceiros sem conferir.** O `trello.com/app-key` citado no README do MCP do Trello está desatualizado — hoje a API key sai do admin de Power-Ups (`trello.com/power-ups/admin`). Antes de mandar o usuário a um painel de credenciais, confirme o fluxo atual na doc oficial do provedor.
+- **Teste unitário não prova que o Spring sobe.** Classe `@Component` com dois construtores sem `@Autowired` passou em todos os testes Mockito e derrubou o boot. Sempre que criar bean com mais de um construtor, converter JPA ou mexer em `SecurityConfig`, valide subindo a API contra Postgres real (container descartável na porta 55432) antes de dar por concluído.
+- **`SseEmitter` aceita um único `onCompletion`.** Registrar um segundo callback sobrescreve a limpeza do hub. Indexação extra de streams tem de ser chamada de dentro da limpeza existente.
+- **Fim de SSE passa de novo pela autorização (despacho ASYNC).** Ao revogar acesso no meio do stream, libere `DispatcherType.ASYNC/ERROR` no `SecurityConfig`, senão aparece AccessDenied com a resposta já enviada.
+- **X-Forwarded-For:** nem a primeira entrada (forjável) nem a última cega (pode ser proxy interno). Use o primeiro IP público lido da direita.
+- **Heredoc com crase ou travessão quebra o Bash tool.** Para criar arquivo ou script com esse conteúdo, use Write e rode o script por arquivo.
+- **MockMvc não mostra o `Location` real.** O Spring Boot gera redirect absoluto por padrão (`server.tomcat.use-relative-redirects=false`), e atrás de proxy isso aponta para o host/porta internos. Fluxo com redirect (formLogin) se valida com servidor real (`RANDOM_PORT`), não só com WebMvcTest.
+- **Regex Java em arquivo novo: use Write, não heredoc do Bash.** O heredoc comeu as barras de `\s`/`\d`, e o script Python lido pelo stdin corrompe acentos. Para conteúdo com `\`, crase ou acento, use Write/Edit.
+- **Auditoria de cards do Trello: o recorte e o backend.** O user cuida so deste repositorio; o app Flutter fica noutro. Ao conferir cards, julgar apenas o que o backend entrega (codigo + operacao do backend); trabalho de app ou de aparelho nao torna o card incompleto. Na duvida, confirmar o recorte antes de comecar.
