@@ -6,8 +6,8 @@
 #   scripts/smoke.sh https://api.exemplo.com
 #   SMOKE_EMAIL=smoke@x SMOKE_PASSWORD=... scripts/smoke.sh https://api.exemplo.com
 #
-# Variaveis opcionais: HEALTH_ATTEMPTS (10), HEALTH_INTERVAL (15 s). O plano
-# free do Render hiberna; a primeira resposta pode levar mais de um minuto.
+# Variaveis opcionais: HEALTH_ATTEMPTS (10), HEALTH_INTERVAL (15 s). Logo apos
+# um deploy a API leva ~30 s para subir; as retentativas cobrem isso.
 # Sai com 1 se qualquer checagem falhar. Requer apenas sh + curl.
 
 BASE="${1:?uso: scripts/smoke.sh <url-base>}"

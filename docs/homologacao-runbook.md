@@ -1,6 +1,6 @@
 # Runbook de homologação — API, banco e migrations V23–V28
 
-Card: **[RNF06][P0] Homologação da API, banco, V19 e observabilidade**. Este documento cobre a parte de backend/banco. A parte de infraestrutura (health no Render, alertas, disponibilidade) depende de quem opera o ambiente e está marcada como pendente no fim.
+Card: **[RNF06][P0] Homologação da API, banco, V19 e observabilidade**. Este documento cobre a parte de backend/banco. A parte de infraestrutura (health na VPS, alertas, disponibilidade) depende de quem opera o ambiente e está marcada como pendente no fim.
 
 ## 1. A "V19 potencialmente destrutiva"
 
@@ -41,29 +41,28 @@ Se alguma consulta retornar linhas, resolva cada caso **manualmente**: cancele a
 
 ## 3. Backup e rollback
 
-1. **Antes do deploy:** faça backup do banco no Supabase (Database → Backups) **e** um `pg_dump` local. Restaure o dump num banco descartável e rode `SELECT count(*) FROM users;` para provar que ele restaura.
-2. **Rollback de código:** volte para a imagem anterior (ver `docs/deploy.md`). As migrations V23–V28 só **adicionam** colunas, tabelas e índices, então a versão anterior da API sobe normalmente com elas aplicadas. O `ddl-auto=validate` ignora colunas a mais.
+1. **Antes do deploy:** rode `scripts/backup.sh` na VPS. Restaure o dump num banco descartável e rode `SELECT count(*) FROM users;` para provar que ele restaura.
+2. **Rollback de código:** `bash scripts/deploy.sh <sha-anterior>` na VPS (ver `docs/deploy-vps.md`). As migrations V23–V28 só **adicionam** colunas, tabelas e índices, então a versão anterior da API sobe normalmente com elas aplicadas. O `ddl-auto=validate` ignora colunas a mais.
 3. **Rollback de banco:** só restaurando o backup. O Flyway não desfaz migration. Use apenas se uma migration corromper dado, o que não deve acontecer nestas.
 
-## 4. Bucket de documentos (RF02)
+## 4. Storage de documentos (RF02)
 
-1. Supabase → Storage → **New bucket** `driver-documents`, com **Public desligado**.
-2. Não crie policy pública. O backend usa a chave `service_role`, que ignora RLS.
-3. Configure no Render: `SUPABASE_URL=https://<ref>.supabase.co` e `SUPABASE_SERVICE_KEY=<service_role>`. **Nunca** coloque essa chave no app.
-4. Sem essas variáveis o upload responde **503** e o resto da API funciona normalmente.
+1. Em prod o `docker-compose.prod.yml` já monta o volume `unimove_documents` e define `DOCUMENTS_DIR`/`DOCUMENTS_PUBLIC_BASE_URL`. Nada a configurar.
+2. Os arquivos ficam cifrados com a `DATA_ENCRYPTION_KEY`; o admin abre por URL assinada de 5 min, servida pela API.
+3. Sem `DOCUMENTS_DIR` (dev/testes) o upload responde **503** e o resto da API funciona normalmente.
 
 ## 4.1 Chave de criptografia (V31)
 
 CPF e número da CNH ficam cifrados (AES-256-GCM). Antes do deploy:
 
-1. Gere a chave com `openssl rand -base64 32` e configure `DATA_ENCRYPTION_KEY` no Render. **Sem ela a API não sobe em prod.**
-2. Guarde uma cópia da chave fora do Render (cofre de senhas). **Perdê-la torna CPF/CNH ilegíveis**, e trocá-la exige recifrar os dados.
+1. Gere a chave com `openssl rand -base64 32` e configure `DATA_ENCRYPTION_KEY` no `.env` da VPS. **Sem ela a API não sobe em prod.**
+2. Guarde uma cópia da chave fora da VPS (cofre de senhas). **Perdê-la torna CPF/CNH e os documentos ilegíveis**, e trocá-la exige recifrar os dados.
 
 ## 5. Variáveis novas
 
 | Variável | Para quê |
 |---|---|
-| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | upload e leitura dos documentos |
+| `DOCUMENTS_DIR`, `DOCUMENTS_PUBLIC_BASE_URL` | upload e leitura dos documentos (definidas pelo compose) |
 | `PRIVACY_TERMS_VERSION`, `PRIVACY_POLICY_URL` | versão e link da política exigidos no cadastro |
 | `DATA_ENCRYPTION_KEY` | **obrigatória em prod**: cifra CPF/CNH |
 | `RATE_LIMIT_*`, `DRIVER_LOCATION_*`, `RETENTION_*` | opcionais; os defaults servem para o piloto |
@@ -114,8 +113,8 @@ Validado em 10/10/2026 contra Postgres 16 limpo: cold start → 2ª tentativa `2
 
 ## 8. Pendente (infra, fora do código)
 
-- [ ] Health do Render com várias tentativas e logs. Um timeout isolado não prova indisponibilidade: o plano free hiberna.
+- [ ] Health da VPS com várias tentativas e logs.
 - [ ] Monitoramento e alerta (ex.: UptimeRobot em `/actuator/health/readiness`, intervalo de 5 min) e disponibilidade esperada.
-- [ ] Criar a conta de smoke em homologação e rodar `scripts/smoke.sh` contra o Render, anexando a saída ao card.
+- [ ] Criar a conta de smoke em homologação e rodar `scripts/smoke.sh` contra a VPS, anexando a saída ao card.
 - [ ] Testar o WhatsApp real em homologação (`PHONE_VERIFICATION_CHANNEL=WHATSAPP`).
 - [ ] Backup verificável agendado.

@@ -46,10 +46,10 @@ Estado em 10/10/2026: **NO-GO**. O backend dos cards está entregue (seção 2).
 | P2 | App não usa coordenadas de demonstração como origem | app | [RF03/RF04][P0] |
 | P3 | App esconde o Pix (o backend já recusa com 409) | app | [RF01]/[RF09] |
 | P4 | `PHONE_VERIFICATION_CHANNEL=WHATSAPP` em homologação com número real da Meta, e um cadastro feito do celular | operador | [RNF06][P0] |
-| P5 | `scripts/smoke.sh` contra o Render: health em várias tentativas, saída anexada ao card | operador | [RNF06][P0] |
+| P5 | `scripts/smoke.sh` contra a VPS: health em várias tentativas, saída anexada ao card | operador | [RNF06][P0] |
 | P6 | Monitor externo em `/actuator/health/readiness` com alerta | operador | [RNF06][P0] |
 | P7 | Backup do banco feito **e restaurado** num banco descartável (prova de restauração) | operador | [RNF06][P0] |
-| P8 | `DATA_ENCRYPTION_KEY`, `JWT_SECRET` e bucket `driver-documents` configurados em prod; chave de cifra guardada fora do Render | operador | [RNF06][P0] |
+| P8 | `DATA_ENCRYPTION_KEY` e `JWT_SECRET` configurados em prod; `.env` guardado fora da VPS | operador | [RNF06][P0] |
 | P9 | Senha do admin do seed trocada em prod (o boot loga `ERROR SEGURANCA` enquanto não trocar) | operador | [RNF04] |
 | P10 | E2E em dois celulares + admin: cadastro, pedido, disputa de aceite, GPS, chat, conclusão, dinheiro, avaliação, com rede instável (3G, modo avião, app em segundo plano) | QA | [INTEGRAÇÃO][P0], [PASSAGEIRO][P0] |
 | P12 | Abrir a cidade do piloto (`POST /admin/cities` com `Remanso`) e desativar `sao-jose-do-rio-preto`, que vem do seed do admin, para não aparecer no seletor do cadastro | operador | [RF01] |
@@ -60,14 +60,14 @@ Estado em 10/10/2026: **NO-GO**. O backend dos cards está entregue (seção 2).
 | Risco | Mitigação | Aceito por / data |
 |---|---|---|
 | OSRM e Photon públicos, sem SLA | cache de rota e geocode no banco; falha vira 503 explícito | |
-| Render free hiberna (primeira requisição demora) | smoke e monitor com retentativa; plano pago se o piloto crescer | |
+| Backup só na VPS (perda da máquina perde tudo) | cópia externa (Storage Box ou Backups da Hetzner) antes de usuários reais | |
 | SSE em memória: uma única instância | documentado; broker só quando houver escala (card RNF08) | |
 | Sem push: o motorista perde corridas com o app fechado | mural por SSE + auto-offline; push fica no card V2 | |
 | GPS em segundo plano sem homologação em aparelho | o backend recusa posição velha, imprecisa ou com salto impossível | |
 
 ## 5. Rollback
 
-1. **Código:** reapontar o Render para a imagem anterior pelo SHA (`docs/deploy.md`). As migrations até a V35 são aditivas, então a versão anterior sobe sobre o banco atual.
+1. **Código:** `bash scripts/deploy.sh <sha-anterior>` na VPS (`docs/deploy-vps.md`). As migrations até a V35 são aditivas, então a versão anterior sobe sobre o banco atual.
 2. **Banco:** só por restauração do backup (P7). O Flyway não desfaz migration.
 3. **Pausar novos cadastros:** `DELETE /admin/cities/{slug}` tira a cidade do seletor sem afetar quem já usa (desativação soft).
 

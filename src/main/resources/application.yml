@@ -46,7 +46,7 @@ management:
       enabled: true
 
 server:
-  # PORT e injetado pelo Render (e pela maioria dos PaaS) e tem precedencia:
+  # PORT e injetado pela maioria dos PaaS e tem precedencia:
   # sem isso o container escuta numa porta que o balanceador nao consulta e o
   # servico nunca fica saudavel. SERVER_PORT continua valendo fora do PaaS.
   port: ${PORT:${SERVER_PORT:8080}}
