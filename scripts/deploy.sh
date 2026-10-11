@@ -3,8 +3,13 @@
 # Se a versao nova nao ficar UP, volta sozinho para a tag anterior.
 #
 #   /opt/unimove/scripts/deploy.sh <tag>      # tag = SHA do commit (CI) ou "latest"
+#   ... <tag> --ghcr-login <usuario>          # token do GHCR pela ENTRADA PADRAO
 #
-# Rollback manual = rodar de novo com o SHA antigo.
+# O CI usa a segunda forma com o GITHUB_TOKEN do proprio job: login, pull e
+# logout dentro do deploy, sem nenhuma credencial permanente na VPS.
+#
+# Rollback manual = rodar de novo com o SHA antigo (sem login, vale para imagens
+# ainda no cache local — 7 dias) ou, no GitHub, Re-run do job de deploy antigo.
 #
 # ATENCAO: migration de banco NAO volta com o rollback. Se a versao quebrada
 # aplicou uma V{n}, o schema fica na frente do codigo antigo — corrija com uma
@@ -13,8 +18,17 @@
 # Variaveis opcionais: HEALTH_ATTEMPTS (36), HEALTH_INTERVAL (5 s).
 set -euo pipefail
 
-TAG="${1:?uso: scripts/deploy.sh <tag>}"
+TAG="${1:?uso: scripts/deploy.sh <tag> [--ghcr-login <usuario>]}"
 cd "$(dirname "$0")/.."
+
+if [ "${2:-}" = "--ghcr-login" ]; then
+    # Pelo stdin, nunca por argumento: argumento aparece no `ps` de qualquer usuario.
+    if docker login ghcr.io -u "${3:?--ghcr-login exige o usuario}" --password-stdin >/dev/null; then
+        trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+    else
+        echo "deploy: AVISO — login no GHCR falhou; so imagens do cache local" >&2
+    fi
+fi
 
 compose() { docker compose -f docker-compose.prod.yml "$@"; }
 
@@ -45,10 +59,23 @@ healthy() {
 # antigo de pe e o health check diria UP para a versao errada.
 up() {
     set_tag "$1" &&
-        compose pull -q api &&
+        pull_api &&
         compose up -d --remove-orphans &&
         reload_caddy &&
         healthy
+}
+
+# Tag ja no cache local sobe mesmo sem acesso ao registry (rollback manual sem
+# login). Tag inexistente nos dois lados falha aqui e dispara o rollback.
+pull_api() {
+    compose pull -q api && return 0
+    local image
+    image="$(compose config --images | grep unimove-backend)"
+    if docker image inspect "$image" >/dev/null 2>&1; then
+        echo "deploy: pull falhou; usando $image do cache local" >&2
+        return 0
+    fi
+    return 1
 }
 
 # O Caddyfile e bind mount: mudar o conteudo nao recria o container. Falhar
