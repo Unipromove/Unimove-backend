@@ -16,7 +16,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/cristianneves/unimove
+  # Namespace do dono do repo: o GITHUB_TOKEN so publica pacotes dele.
+  IMAGE: ghcr.io/unipromove/unimove-backend
 
 jobs:
   test:
@@ -92,7 +93,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          # Sem RUN no Dockerfile, a imagem arm64 sai sem emulacao: cobre VPS ARM (Hetzner CAX).
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
