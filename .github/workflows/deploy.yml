@@ -1,7 +1,7 @@
 name: CI/CD
 
 # PR na main  -> so roda os testes (gate de merge).
-# Push na main -> testes, publica a imagem no GHCR e dispara o deploy no Render.
+# Push na main -> testes, publica a imagem no GHCR e faz o deploy na VPS (SSH).
 on:
   push:
     branches: [main]
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 # Dois deploys simultaneos disputariam o mesmo servico. Enfileira em vez de
-# cancelar: cancelar no meio deixaria o Render num estado indefinido.
+# cancelar: cancelar no meio deixaria a VPS entre duas versoes.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
@@ -99,55 +99,69 @@ jobs:
             ${{ env.IMAGE }}:latest
 
   deploy:
-    name: Deploy no Render
+    name: Deploy na VPS
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     steps:
-      # No bootstrap o servico no Render ainda nao existe (ele so pode ser criado
-      # depois que a imagem estiver publicada). Sem o hook, pular com aviso e
-      # melhor do que falhar o build por falta de configuracao.
-      - name: Verificar configuracao do Render
+      # Sem VPS_HOST, pular com aviso: e assim que o primeiro deploy espera o
+      # restore dos dados (docs/deploy-vps.md). Subir a API antes deixaria o
+      # Flyway criar o schema vazio e o restore colidiria com ele.
+      - name: Verificar configuracao da VPS
         id: cfg
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
-            echo "::warning::RENDER_DEPLOY_HOOK nao configurado — deploy pulado. A imagem foi publicada no GHCR; crie o servico no Render e cadastre o secret (docs/deploy.md)."
+          if [ -z "$VPS_HOST" ]; then
+            echo "::warning::VPS_HOST nao configurado — deploy pulado. A imagem foi publicada no GHCR (docs/deploy-vps.md)."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Servicos que rodam imagem de registry nao redeployam sozinhos quando a
-      # tag e reescrita — o deploy so acontece com este hook. O imgURL fixa o
-      # SHA exato: o deploy fica versionado, e reenviar o hook com um SHA antigo
-      # e o rollback.
-      - name: Disparar deploy
+      # So os arquivos da stack vao para a VPS; nada de codigo-fonte.
+      - uses: actions/checkout@v4
         if: steps.cfg.outputs.skip != 'true'
-        run: |
-          curl -fsS -G "${{ secrets.RENDER_DEPLOY_HOOK }}" \
-            --data-urlencode "imgURL=${{ env.IMAGE }}:${{ github.sha }}"
 
-      # O hook responde na hora, sem esperar o deploy. Confirmamos pelo endpoint
-      # publico. O sleep inicial evita ler o health da versao ANTIGA, que ainda
-      # responde nos primeiros segundos.
-      - name: Aguardar o servico voltar
+      # Chave dedicada ao CI e host fixado: sem o known_hosts, um
+      # StrictHostKeyChecking=no aceitaria qualquer servidor no meio do caminho.
+      - name: Configurar SSH
         if: steps.cfg.outputs.skip != 'true'
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
-          # Barra no fim do secret produz "//actuator/health", que nao casa com o
-          # permitAll do Spring Security e responde 401 — um erro que o log nao
-          # explicava, porque o GitHub mascara a URL por ser secret.
-          BASE=$(printf '%s' "${{ secrets.RENDER_SERVICE_URL }}" | sed 's:/*$::')
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-          sleep 45
-          for i in $(seq 1 40); do
+      # Sincroniza compose/Caddyfile/scripts com o commit e roda o deploy.sh,
+      # que sobe a tag do SHA, confere o health local e faz rollback sozinho.
+      # Os segredos ficam no .env da VPS: o CI so conhece a chave de SSH.
+      - name: Deploy
+        if: steps.cfg.outputs.skip != 'true'
+        env:
+          TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+        run: |
+          tar czf - docker-compose.prod.yml Caddyfile scripts | ssh "$TARGET" 'tar xzf - -C /opt/unimove'
+          ssh "$TARGET" "bash /opt/unimove/scripts/deploy.sh ${{ github.sha }}"
+
+      # O deploy.sh ja provou o health por dentro; aqui prova o caminho publico
+      # (DNS do DuckDNS + certificado do Caddy). Variavel, nao secret: a URL e
+      # publica e mascarada so atrapalharia o log.
+      - name: Health publico
+        if: steps.cfg.outputs.skip != 'true' && vars.VPS_PUBLIC_URL != ''
+        run: |
+          BASE=$(printf '%s' "${{ vars.VPS_PUBLIC_URL }}" | sed 's:/*$::')
+          for i in $(seq 1 6); do
             CODE=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 10 \
                      "$BASE/actuator/health" || echo 000)
             if [ "$CODE" = "200" ] && grep -q '"status":"UP"' /tmp/health.json; then
-              echo "servico UP apos $((45 + i * 15))s"
+              echo "servico UP em $BASE"
               exit 0
             fi
-            # 000=sem resposta, 404/401=URL errada, 502/503=ainda subindo
             echo "tentativa $i: HTTP $CODE"
-            sleep 15
+            sleep 10
           done
-          echo "::error::O servico nao respondeu UP (ultimo HTTP $CODE). 401/404 indicam RENDER_SERVICE_URL errado; 502/503, deploy quebrado — veja os logs em https://dashboard.render.com"
+          echo "::error::$BASE nao respondeu UP (ultimo HTTP $CODE). 000 = DNS/firewall; erro de TLS = Caddy sem certificado (docker compose logs caddy)."
           exit 1
