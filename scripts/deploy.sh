@@ -45,7 +45,7 @@ healthy() {
 # antigo de pe e o health check diria UP para a versao errada.
 up() {
     set_tag "$1" &&
-        compose pull api &&
+        compose pull -q api &&
         compose up -d --remove-orphans &&
         reload_caddy &&
         healthy
