@@ -191,7 +191,7 @@ Pull request na `main` roda **so** o job de testes — funciona como gate de mer
 
 Alvo: **VPS Hetzner** com [`docker-compose.prod.yml`](./docker-compose.prod.yml)
 (API + Postgres 17 + documentos cifrados em volume + Caddy/Let's Encrypt), sem
-servico gerenciado. Preparacao da VPS, auto-deploy, backup e rollback em
+servico gerenciado. A VPS se prepara com um script (`scripts/bootstrap-vps.sh`); passo a passo, auto-deploy, backup e rollback em
 [`docs/deploy-vps.md`](./docs/deploy-vps.md).
 
 O `Dockerfile` e **so de runtime**: espera um `app.jar` pronto no contexto (o CI
