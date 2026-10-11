@@ -106,10 +106,14 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
+    # packages: read = o GITHUB_TOKEN do job puxa a imagem privada na VPS
+    # (login/logout dentro do deploy.sh). Nenhum token permanente na VPS.
+    permissions:
+      contents: read
+      packages: read
     steps:
-      # Sem VPS_HOST, pular com aviso: e assim que o primeiro deploy espera o
-      # restore dos dados (docs/deploy-vps.md). Subir a API antes deixaria o
-      # Flyway criar o schema vazio e o restore colidiria com ele.
+      # Sem VPS_HOST, pular com aviso: a VPS ainda nao foi preparada
+      # (scripts/bootstrap-vps.sh, docs/deploy-vps.md).
       - name: Verificar configuracao da VPS
         id: cfg
         env:
@@ -144,9 +148,11 @@ jobs:
         if: steps.cfg.outputs.skip != 'true'
         env:
           TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tar czf - docker-compose.prod.yml Caddyfile scripts | ssh "$TARGET" 'tar xzf - -C /opt/unimove'
-          ssh "$TARGET" "bash /opt/unimove/scripts/deploy.sh ${{ github.sha }}"
+          # Token pelo stdin do ssh: nao aparece em argumento nem no log.
+          printf '%s' "$GHCR_TOKEN" | ssh "$TARGET"             "bash /opt/unimove/scripts/deploy.sh ${{ github.sha }} --ghcr-login ${{ github.actor }}"
 
       # O deploy.sh ja provou o health por dentro; aqui prova o caminho publico
       # (DNS do DuckDNS + certificado do Caddy). Variavel, nao secret: a URL e
