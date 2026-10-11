@@ -16,9 +16,8 @@ x-logging: &default-logging
 
 services:
   postgres:
-    # Mesma major do Supabase de onde os dados vieram: dump de uma versao mais
-    # nova nao restaura numa mais velha. Subir de major = dump/restore, nunca
-    # so trocar a tag (o formato do diretorio de dados muda).
+    # Major fixa: subir de versao = dump/restore, nunca so trocar a tag
+    # (o formato do diretorio de dados muda entre majors).
     image: postgres:17-alpine
     container_name: unimove-postgres-prod
     restart: always
@@ -40,7 +39,7 @@ services:
       retries: 5
 
   api:
-    image: ghcr.io/cristianneves/unimove:${IMAGE_TAG:-latest}
+    image: ghcr.io/unipromove/unimove-backend:${IMAGE_TAG:-latest}
     container_name: unimove-api-prod
     restart: always
     logging: *default-logging
@@ -50,7 +49,7 @@ services:
     # Com o MaxRAMPercentage=50 do Dockerfile, heap de ~768 MB. O resto dos
     # 4 GB fica para o Postgres, o Caddy e o page cache do SO.
     mem_limit: 1536m
-    # Todas as variaveis do app (WhatsApp, Google, Supabase Storage, LGPD...)
+    # Todas as variaveis do app (WhatsApp, Google, LGPD...)
     # vem do .env: uma variavel nova nao precisa ser repetida aqui. As de baixo
     # sobrescrevem o .env porque so fazem sentido dentro desta stack.
     env_file: .env
@@ -62,8 +61,13 @@ services:
       # Sem estes o boot falha de qualquer jeito; o :? so falha antes, com
       # mensagem clara, em vez de um stacktrace do Spring.
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
-      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env (copie o do ambiente anterior)}
-      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?defina DATA_ENCRYPTION_KEY no .env (copie o do ambiente anterior)}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env (openssl rand -base64 48)}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?defina DATA_ENCRYPTION_KEY no .env (openssl rand -base64 32)}
+      # Documentos do motorista, cifrados, no volume abaixo.
+      DOCUMENTS_DIR: /data/documents
+      DOCUMENTS_PUBLIC_BASE_URL: https://${DOMAIN:?defina DOMAIN no .env}
+    volumes:
+      - unimove_documents:/data/documents
     # Loopback: quem publica na internet e o Caddy. O deploy.sh usa esta porta
     # para o health check local.
     ports:
@@ -98,5 +102,6 @@ services:
 
 volumes:
   unimove_pgdata_prod:
+  unimove_documents:
   caddy_data:
   caddy_config:

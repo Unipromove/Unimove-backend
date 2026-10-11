@@ -14,6 +14,12 @@ COPY app.jar app.jar
 # O Docker aceita um UID sem entrada em /etc/passwd.
 USER 65532:65532
 
+# Raiz dos documentos do motorista (volume no docker-compose.prod.yml). O
+# WORKDIR depois do USER nasce com dono 65532 no BuildKit, e um volume nomeado
+# vazio herda esse dono — sem `RUN mkdir/chown`.
+WORKDIR /data/documents
+WORKDIR /app
+
 # O teto de memoria vem do container (mem_limit no docker-compose.prod.yml):
 #   MaxRAMPercentage=50  -> metade do limite para o heap, o resto para
 #                           metaspace, code cache, threads e memoria nativa.
