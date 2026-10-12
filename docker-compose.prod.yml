@@ -27,7 +27,7 @@ services:
       POSTGRES_USER: unimove
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
     volumes:
-      - unimove_pgdata_prod:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     # Loopback apenas — o banco nunca fica exposto na internet.
     # Para inspecionar de fora: ssh -L 5432:127.0.0.1:5432 <vps>
     ports:
@@ -67,7 +67,7 @@ services:
       DOCUMENTS_DIR: /data/documents
       DOCUMENTS_PUBLIC_BASE_URL: https://${DOMAIN:?defina DOMAIN no .env}
     volumes:
-      - unimove_documents:/data/documents
+      - documents:/data/documents
     # Loopback: quem publica na internet e o Caddy. O deploy.sh usa esta porta
     # para o health check local.
     ports:
@@ -100,8 +100,12 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
+# O compose prefixa com o nome do projeto (diretorio): unimove_pgdata e
+# unimove_documents na VPS. Nome novo de proposito: a VPS ainda guarda o volume
+# do deploy antigo (unimove_unimove_pgdata_prod, Postgres 16), que um Postgres 17
+# nao abriria.
 volumes:
-  unimove_pgdata_prod:
-  unimove_documents:
+  pgdata:
+  documents:
   caddy_data:
   caddy_config:

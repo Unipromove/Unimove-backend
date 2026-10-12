@@ -18,7 +18,7 @@ git push origin main            (repo Unipromove/Unimove-backend)
 | Peca | Onde |
 |---|---|
 | API (Spring Boot) | container `unimove-api-prod`, heap ~768 MB (`mem_limit: 1536m`) |
-| Postgres 17 | container `unimove-postgres-prod`, volume `unimove_pgdata_prod`, so em `127.0.0.1` |
+| Postgres 17 | container `unimove-postgres-prod`, volume `unimove_pgdata`, so em `127.0.0.1` |
 | Documentos do motorista | volume `unimove_documents`, **cifrados** com a `DATA_ENCRYPTION_KEY`; o admin abre por URL assinada de 5 min servida pela API (`/files/documents/**`) |
 | TLS | Caddy + Let's Encrypt automatico (`Caddyfile`), dominio DuckDNS |
 | Backup | cron diario 03:30 UTC: `pg_dump` + tar dos documentos, 7 copias **so na VPS** |
