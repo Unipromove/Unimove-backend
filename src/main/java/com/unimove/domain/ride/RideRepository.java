@@ -231,13 +231,15 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     /**
      * Agregação de corridas do período (por created_at) para o painel admin:
      * total, contagens por status final e somatórios de receita. Uma única query.
+     * SUM sobre período vazio é NULL: as contagens precisam do COALESCE, senão
+     * o construtor (long primitivo) quebra com 500.
      */
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMetricsAggregate(
                 COUNT(r),
-                SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END),
-                SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.CANCELLED THEN 1L ELSE 0L END),
-                SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.EXPIRED   THEN 1L ELSE 0L END),
+                COALESCE(SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.CANCELLED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.EXPIRED   THEN 1L ELSE 0L END), 0L),
                 COALESCE(SUM(CASE WHEN r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN r.preco ELSE 0 END), 0),
                 COALESCE(SUM(COALESCE(r.cancellationFee, 0)), 0)
             )
@@ -257,11 +259,11 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             SELECT new com.unimove.domain.ride.dto.PaymentMetricsAggregate(
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED
                                   THEN r.cashReceivedAmount ELSE 0 END), 0),
-                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
-                          AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END),
-                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END),
-                SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.SIMULATED
-                          AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END)
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
+                          AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END), 0L),
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.SIMULATED
+                          AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END), 0L)
             )
             FROM Ride r
             WHERE r.createdAt >= :from AND r.createdAt < :to

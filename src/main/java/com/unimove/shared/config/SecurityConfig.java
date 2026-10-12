@@ -19,11 +19,21 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
+import org.springframework.security.web.header.writers.StaticHeadersWriter;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 @Configuration
 @EnableMethodSecurity
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
+
+    /**
+     * Painel de admin: so HTML/JS/CSS proprios, sem inline nem CDN. O JWT do
+     * admin fica no sessionStorage, entao a CSP e a defesa contra XSS.
+     */
+    public static final String PAINEL_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; "
+            + "img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final ObjectMapper objectMapper;
@@ -38,6 +48,9 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                        AntPathRequestMatcher.antMatcher("/painel/**"),
+                        new StaticHeadersWriter("Content-Security-Policy", PAINEL_CSP))))
                 .authorizeHttpRequests(auth -> auth
                         // Despacho ASYNC/ERROR e continuacao de um request ja autorizado
                         // (fim de stream SSE, pagina de erro). Reautorizar ali falha com
@@ -59,6 +72,9 @@ public class SecurityConfig {
                                 // Versao e link da politica de privacidade: exibidos
                                 // na tela de cadastro, antes de existir token.
                                 "/legal/**",
+                                // Painel de admin: arquivos estaticos. Os dados vem de /admin/*,
+                                // que continua exigindo JWT de ADMIN.
+                                "/painel", "/painel/**",
                                 // Swagger: cadeia propria com login de admin (DocsSecurityConfig).
                                 // Health (status + probes) e versao do build: lidos pelo
                                 // deploy, pelo monitor externo e pelo scripts/smoke.sh.

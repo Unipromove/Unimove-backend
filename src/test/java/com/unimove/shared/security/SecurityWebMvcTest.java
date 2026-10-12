@@ -34,6 +34,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -181,6 +183,33 @@ class SecurityWebMvcTest {
                 .andExpect(status().isOk());
         verify(rideService).history(eq(new AuthenticatedUser(
                 passageiro.getId(), passageiro.getEmail(), Role.PASSAGEIRO, passageiro.getCidade())), any(), any());
+    }
+
+    @Test
+    @DisplayName("painel de admin: arquivos estaticos publicos e com CSP restrita")
+    void adminPanelIsPublicWithCsp() throws Exception {
+        mvc.perform(get("/painel/index.html"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Security-Policy", SecurityConfig.PAINEL_CSP));
+        mvc.perform(get("/painel/js/core.js"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("/painel e /painel/ abrem o index sem redirect")
+    void adminPanelRootForwardsToIndex() throws Exception {
+        mvc.perform(get("/painel")).andExpect(status().isOk()).andExpect(forwardedUrl("/painel/index.html"));
+        mvc.perform(get("/painel/")).andExpect(status().isOk()).andExpect(forwardedUrl("/painel/index.html"));
+    }
+
+    @Test
+    @DisplayName("liberar o painel nao abre a API: /admin sem token segue 401, sem CSP do painel")
+    void adminPanelDoesNotOpenAdminApi() throws Exception {
+        mvc.perform(get("/admin/rides"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist("Content-Security-Policy"));
+        mvc.perform(get("/painelx"))
+                .andExpect(status().isUnauthorized());
     }
 
     private String bearer(User user) {
