@@ -68,6 +68,31 @@ class FieldCryptoTest {
     }
 
     @Test
+    @DisplayName("bytes: cifra e decifra; o cifrado nao contem o original e muda a cada chamada")
+    void bytesRoundTrip() {
+        byte[] plain = "conteudo-de-uma-cnh".getBytes();
+        byte[] stored = crypto.encryptBytes(plain);
+
+        assertThat(new String(stored)).doesNotContain("conteudo-de-uma-cnh");
+        assertThat(stored).isNotEqualTo(crypto.encryptBytes(plain));
+        assertThat(crypto.decryptBytes(stored)).isEqualTo(plain);
+    }
+
+    @Test
+    @DisplayName("bytes: adulterado, truncado ou com outra chave falha (GCM autentica)")
+    void bytesTamperedFails() {
+        byte[] stored = crypto.encryptBytes("abc".getBytes());
+        byte[] tampered = stored.clone();
+        tampered[tampered.length - 1] ^= 1;
+        byte[] otherKey = new byte[32];
+        otherKey[0] = 7;
+
+        assertThatThrownBy(() -> crypto.decryptBytes(tampered)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> crypto.decryptBytes(new byte[5])).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new FieldCrypto(otherKey).decryptBytes(stored)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     @DisplayName("chave de tamanho errado e recusada")
     void wrongKeySize() {
         assertThatThrownBy(() -> new FieldCrypto(new byte[16])).isInstanceOf(IllegalStateException.class);

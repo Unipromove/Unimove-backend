@@ -14,12 +14,19 @@ COPY app.jar app.jar
 # O Docker aceita um UID sem entrada em /etc/passwd.
 USER 65532:65532
 
-# Calibrado para o container de 512 MB do Render (plano free):
-#   MaxRAMPercentage=50  -> heap de ~256 MB, deixando espaco para metaspace,
-#                           code cache, threads e memoria nativa. Com 75% a JVM
-#                           estoura o limite e o container e morto por OOM.
-#   SerialGC             -> o G1 sobe varios threads e estruturas proprias; num
-#                           heap pequeno com 0.1 vCPU ele custa mais do que rende.
+# Raiz dos documentos do motorista (volume no docker-compose.prod.yml). O
+# WORKDIR depois do USER nasce com dono 65532 no BuildKit, e um volume nomeado
+# vazio herda esse dono — sem `RUN mkdir/chown`.
+WORKDIR /data/documents
+WORKDIR /app
+
+# O teto de memoria vem do container (mem_limit no docker-compose.prod.yml):
+#   MaxRAMPercentage=50  -> metade do limite para o heap, o resto para
+#                           metaspace, code cache, threads e memoria nativa.
+#                           Com 75% a JVM estoura o limite e o container e
+#                           morto por OOM.
+#   SerialGC             -> o G1 sobe varios threads e estruturas proprias;
+#                           num heap abaixo de 1 GB ele custa mais do que rende.
 ENV JAVA_OPTS="-XX:+UseSerialGC -XX:MaxRAMPercentage=50.0 -Duser.timezone=UTC"
 EXPOSE 8080
 

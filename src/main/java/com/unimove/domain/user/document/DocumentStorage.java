@@ -1,22 +1,21 @@
 package com.unimove.domain.user.document;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Armazenamento PRIVADO dos arquivos de documento. Nenhum arquivo tem URL
- * publica: a leitura e sempre por URL assinada de vida curta, emitida so para
- * o admin (e auditada).
+ * publica: a leitura para o admin passa por URL assinada de vida curta
+ * ({@link DocumentUrlSigner}), emitida so para ele e auditada.
  */
 public interface DocumentStorage {
 
+    /** Nunca sobrescreve: caminho ja ocupado e erro. */
     void put(String path, byte[] content, String contentType);
 
-    SignedUrl signedUrl(String path, Duration ttl);
+    /** Conteudo original do arquivo; vazio se ele nao existe. */
+    Optional<byte[]> read(String path);
 
     /** Idempotente: caminho inexistente nao e erro. */
     void delete(List<String> paths);
-
-    record SignedUrl(String url, Instant expiresAt) {}
 }

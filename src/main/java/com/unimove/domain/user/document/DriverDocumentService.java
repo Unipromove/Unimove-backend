@@ -66,6 +66,7 @@ public class DriverDocumentService {
     private final DriverDocumentRepository documentRepository;
     private final DocumentStorage storage;
     private final DocumentStorageProperties storageProps;
+    private final DocumentUrlSigner urlSigner;
     private final AdminAuditLog auditLog;
     private final FieldCrypto crypto;
     private final Clock clock;
@@ -74,6 +75,7 @@ public class DriverDocumentService {
                                  DriverDocumentRepository documentRepository,
                                  DocumentStorage storage,
                                  DocumentStorageProperties storageProps,
+                                 DocumentUrlSigner urlSigner,
                                  AdminAuditLog auditLog,
                                  FieldCrypto crypto,
                                  Clock clock) {
@@ -81,6 +83,7 @@ public class DriverDocumentService {
         this.documentRepository = documentRepository;
         this.storage = storage;
         this.storageProps = storageProps;
+        this.urlSigner = urlSigner;
         this.auditLog = auditLog;
         this.crypto = crypto;
         this.clock = clock;
@@ -311,7 +314,7 @@ public class DriverDocumentService {
         }
         auditLog.record(adminId, AuditAction.DRIVER_DOCUMENT_VIEWED, "DRIVER_DOCUMENT", documentId,
                 "driver=" + driverId + " type=" + doc.getType());
-        DocumentStorage.SignedUrl signed = storage.signedUrl(doc.getStoragePath(),
+        DocumentUrlSigner.SignedUrl signed = urlSigner.sign(doc.getStoragePath(),
                 Duration.ofSeconds(storageProps.signedUrlTtlSeconds()));
         return new DocumentFileUrlResponse(signed.url(), signed.expiresAt());
     }

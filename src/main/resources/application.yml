@@ -46,7 +46,7 @@ management:
       enabled: true
 
 server:
-  # PORT e injetado pelo Render (e pela maioria dos PaaS) e tem precedencia:
+  # PORT e injetado pela maioria dos PaaS e tem precedencia:
   # sem isso o container escuta numa porta que o balanceador nao consulta e o
   # servico nunca fica saudavel. SERVER_PORT continua valendo fora do PaaS.
   port: ${PORT:${SERVER_PORT:8080}}
@@ -115,13 +115,13 @@ app:
     terms-version: ${PRIVACY_TERMS_VERSION:2026-10}
     policy-url: ${PRIVACY_POLICY_URL:https://unimove.app/privacidade}
   storage:
-    supabase:
-      # Bucket PRIVADO dos documentos do motorista (CNH/CRLV/selfie). Sem url/key o
-      # upload responde 503 (dev/testes). service-key = service_role: so no backend.
-      url: ${SUPABASE_URL:}
-      service-key: ${SUPABASE_SERVICE_KEY:}
-      bucket: ${SUPABASE_DOCUMENTS_BUCKET:driver-documents}
-      signed-url-ttl-seconds: ${SUPABASE_SIGNED_URL_TTL_SECONDS:300}
+    documents:
+      # Documentos do motorista (CNH/CRLV/selfie) em disco, cifrados com a
+      # DATA_ENCRYPTION_KEY. Sem dir o upload responde 503 (dev/testes).
+      dir: ${DOCUMENTS_DIR:}
+      # Prefixo da URL assinada entregue ao admin (https://dominio). Vazio = relativa.
+      public-base-url: ${DOCUMENTS_PUBLIC_BASE_URL:}
+      signed-url-ttl-seconds: ${DOCUMENTS_SIGNED_URL_TTL_SECONDS:300}
   whatsapp:
     # Numero da UniMove em E.164 sem '+'. So usado com channel=WHATSAPP.
     business-number: ${WHATSAPP_BUSINESS_NUMBER:}

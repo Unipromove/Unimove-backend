@@ -86,7 +86,7 @@ com.unimove
 ├── domain.user       Auth, JWT, driver online/offline, admin, favoritos,         [implementado]
 │                     ratings, suspensao de usuario, privacidade (LGPD)
 │   └── document      Cadastro documental do motorista (CPF/CNH/veiculo +        [implementado]
-│                     CNH/CRLV/selfie em bucket privado do Supabase Storage)
+│                     CNH/CRLV/selfie cifrados em disco, URL assinada curta)
 ├── domain.audit      Trilha de auditoria das acoes administrativas              [implementado]
 ├── domain.notification  Caixa de entrada in-app + campanhas admin (sem push)    [implementado]
 ├── domain.maps       Gateway OSRM (rotas + geometria/polyline) + cache de rotas,  [implementado]
@@ -116,7 +116,7 @@ com.unimove
 - **Login social — guia do app:** [`docs/guia-app-login-google.md`](./docs/guia-app-login-google.md) — passo a passo para o dev mobile: OAuth clients de plataforma, `google_sign_in` e os dois fluxos de tela.
 - **Go/No-Go do piloto:** [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md) — decisões de escopo, critérios bloqueantes, riscos aceitos e rollback.
 - **Matriz de requisitos:** [`docs/matriz-requisitos-mvp.md`](./docs/matriz-requisitos-mvp.md) — evidência do backend para RF01–RF10 e RNF01–RNF09.
-- **Deploy:** [`docs/deploy.md`](./docs/deploy.md) — Render + Supabase, secrets do GitHub, rollback e limites do plano gratuito.
+- **Deploy:** [`docs/deploy-vps.md`](./docs/deploy-vps.md) — VPS Hetzner, auto-deploy, backup, rollback e operacao.
 - **Homologação / runbook:** [`docs/homologacao-runbook.md`](./docs/homologacao-runbook.md) — checagens antes de aplicar V23–V28, bucket de documentos, smoke autenticado, backup e rollback.
 - **LGPD — inventário de dados:** [`docs/lgpd-inventario-dados.md`](./docs/lgpd-inventario-dados.md) — o que coletamos, por quê, com quem compartilhamos, retenção e como atender o titular.
 - **Contrato das novidades para o app:** [`docs/contrato-mvp-backend-gaps.md`](./docs/contrato-mvp-backend-gaps.md) — endpoints e campos novos/alterados desta versão (cadastro com `termsVersion`, documentos, dinheiro, GPS, privacidade).
@@ -142,10 +142,10 @@ com.unimove
 | `GOOGLE_LOGIN_ENABLED` | `false`                           | nao — `true` liga `/auth/social` |
 | `GOOGLE_CLIENT_IDS`   | —                                  | so com `GOOGLE_LOGIN_ENABLED=true` |
 | `GOOGLE_JWK_SET_URI`  | JWKS do Google                     | nao         |
-| `SUPABASE_URL`        | —                                  | nao — sem ele o upload de documentos do motorista responde 503 |
-| `SUPABASE_SERVICE_KEY` | —                                 | junto com `SUPABASE_URL` (chave **service_role**, so no backend) |
-| `SUPABASE_DOCUMENTS_BUCKET` | `driver-documents`           | nao — bucket **privado** |
-| `DATA_ENCRYPTION_KEY` | —                                  | **sim em prod** — 32 bytes base64 (`openssl rand -base64 32`); cifra CPF/CNH. Sem ela o boot de prod falha; perder a chave torna os dados ilegiveis |
+| `DOCUMENTS_DIR`       | —                                  | nao — diretorio dos documentos do motorista (cifrados); sem ele o upload responde 503. Em prod vem do compose |
+| `DOCUMENTS_PUBLIC_BASE_URL` | —                            | nao — prefixo da URL assinada do admin (`https://dominio`); vazio = relativa |
+| `DOCUMENTS_SIGNED_URL_TTL_SECONDS` | `300`                 | nao — vida da URL assinada |
+| `DATA_ENCRYPTION_KEY` | —                                  | **sim em prod** — 32 bytes base64 (`openssl rand -base64 32`); cifra CPF/CNH e os arquivos de documento. Sem ela o boot de prod falha; perder a chave torna os dados ilegiveis |
 | `RETENTION_ENABLED` / `RETENTION_RIDE_YEARS` / `RETENTION_REJECTED_DOCUMENT_DAYS` | `true` / `5` / `90` | nao — expurgo LGPD diario (03:30 BRT) |
 | `PRIVACY_TERMS_VERSION` | `2026-10`                        | nao — versao vigente dos termos; trocar exige novo aceite |
 | `PRIVACY_POLICY_URL`  | `https://unimove.app/privacidade`  | nao — link exibido no cadastro |
@@ -154,9 +154,10 @@ com.unimove
 | `DRIVER_LOCATION_MAX_AGE_SECONDS` / `_MAX_ACCURACY_M` / `_MAX_SPEED_KMH` | `120` / `100` / `180` | nao — sanidade do GPS |
 | `PAYMENT_PIX_ENABLED` | `false`                            | nao — piloto **so dinheiro**: Pix (simulado, sem PSP) responde 409. Ligar so com PSP real |
 | `UNIMOVE_ALLOW_DESTRUCTIVE_V19` | `false`                  | nao — libera a V19 (apaga usuarios/corridas) num banco abaixo dela com dados; sem isso o boot aborta |
-| `PORT`                | —                                  | nao — injetado pelo Render; tem precedencia sobre `SERVER_PORT` |
-| `DOMAIN`              | —                                  | so no `docker-compose.prod.yml` (self-host) — dominio que o Caddy usa no TLS |
-| `IMAGE_TAG`           | `latest`                           | so no `docker-compose.prod.yml` (self-host) |
+| `PORT`                | —                                  | nao — injetado por PaaS; tem precedencia sobre `SERVER_PORT` |
+| `DOMAIN`              | —                                  | so no `docker-compose.prod.yml` — dominio que o Caddy usa no TLS |
+| `IMAGE_TAG`           | `latest`                           | so no `docker-compose.prod.yml` — escrito pelo `scripts/deploy.sh` |
+| `DB_POOL_SIZE`        | `10`                               | nao — pool do Hikari no perfil `prod` |
 
 Nenhuma das variaveis de WhatsApp e necessaria para desenvolver: o default `channel=LOG` roda o fluxo
 completo de verificacao localmente, sem conta na Meta e sem tunel (ver secao 0 de `docs/api.http`).
@@ -179,7 +180,7 @@ Push na `main` dispara o pipeline em [`.github/workflows/deploy.yml`](./.github/
 ```
 [test]   mvn -B verify (473 unitarios + 23 IT contra Postgres 16 de servico)
 [build]  buildx --platform linux/amd64 -> ghcr.io/cristianneves/unimove:<sha> + :latest
-[deploy] deploy hook do Render com imgURL=<sha>, depois espera /actuator/health
+[deploy] ssh na VPS -> scripts/deploy.sh <sha> (health local + rollback), depois health publico
 ```
 
 Observabilidade publica: `/actuator/health` (so status), `/actuator/health/liveness`,
@@ -188,23 +189,16 @@ Observabilidade publica: `/actuator/health` (so status), `/actuator/health/liven
 
 Pull request na `main` roda **so** o job de testes — funciona como gate de merge.
 
-Alvo: **Render** (web service, plano free) + **Supabase** (Postgres). Passo a
-passo, secrets e rollback em [`docs/deploy.md`](./docs/deploy.md).
-
-> ⚠️ O plano free do Render **hiberna apos 15 min sem trafego**: o primeiro
-> acesso depois disso leva 30–60 s e os `@Scheduled` (expiracao de corrida,
-> auto-offline de motorista) nao rodam enquanto o servico dorme. Serve para
-> demo e integracao do app; nao para o piloto real. Ver os limites em
-> [`docs/deploy.md`](./docs/deploy.md).
+Alvo: **VPS Hetzner** com [`docker-compose.prod.yml`](./docker-compose.prod.yml)
+(API + Postgres 17 + documentos cifrados em volume + Caddy/Let's Encrypt), sem
+servico gerenciado. A VPS se prepara com um script (`scripts/bootstrap-vps.sh`); passo a passo, auto-deploy, backup e rollback em
+[`docs/deploy-vps.md`](./docs/deploy-vps.md).
 
 O `Dockerfile` e **so de runtime**: espera um `app.jar` pronto no contexto (o CI
 compila antes). Para buildar a imagem na mao:
 ```bash
 ./mvnw package && cp target/unimove-backend-*.jar app.jar && docker build -t unimove .
 ```
-
-Para rodar a stack completa (API + Postgres + TLS) numa VPS propria, o
-[`docker-compose.prod.yml`](./docker-compose.prod.yml) ja esta pronto.
 
 ---
 
@@ -275,7 +269,7 @@ Cobertura atual (`mvn test`) — **485 testes unitarios** + **24 de integracao**
 - `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
 - `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`
 - `DriverLocationPolicyTest` — GPS velho/futuro/impreciso/salto impossivel/fora de ordem
-- `DriverDocumentServiceTest`, `SupabaseDocumentStorageTest`, `DocumentFileInspectorTest`, `DriverDocumentControllerWebMvcTest`, `CpfTest`
+- `DriverDocumentServiceTest`, `LocalDocumentStorageTest`, `DocumentUrlSignerTest`, `DocumentFileControllerWebMvcTest`, `DocumentFileInspectorTest`, `DriverDocumentControllerWebMvcTest`, `CpfTest`
 - `AccountPrivacyServiceTest`, `RidePrivacyServiceTest`, `UserPrivacyControllerWebMvcTest`
 - `RideControllerContractTest` — contrato HTTP de todos os endpoints de corrida (status, validacao, shape do JSON)
 
