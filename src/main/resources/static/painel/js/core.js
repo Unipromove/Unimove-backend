@@ -67,7 +67,7 @@ export const fmt = {
   date: v => (v ? dt.format(new Date(v)) : '—'),
   day: v => (v ? new Date(`${v}T00:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—'),
   fullDay: v => (v ? new Date(`${v}T00:00:00`).toLocaleDateString('pt-BR') : '—'),
-  pct: v => `${(Number(v || 0) * 100).toFixed(1)}%`,
+  pct: v => Number(v || 0).toLocaleString('pt-BR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }),
   num: v => Number(v || 0).toLocaleString('pt-BR'),
   id: v => (v ? String(v).slice(0, 8) : '—'),
 };
