@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>UniMove Admin</title>
+  <link rel="stylesheet" href="/painel/app.css">
+  <script type="module" src="/painel/js/main.js"></script>
+</head>
+<body>
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="card login-card">
+      <h1>UniMove <span>Admin</span></h1>
+      <label>E-mail <input name="email" type="email" autocomplete="username" required></label>
+      <label>Senha <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary">Entrar</button>
+      <p class="muted small">Acesso restrito a contas ADMIN.</p>
+    </form>
+  </section>
+
+  <section id="change-password" class="login" hidden>
+    <form id="change-password-form" class="card login-card">
+      <h1>Trocar senha</h1>
+      <p class="muted small">Sua senha é temporária. Defina uma nova para continuar.</p>
+      <label>Senha atual <input name="currentPassword" type="password" autocomplete="current-password" required></label>
+      <label>Nova senha <input name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="72" required></label>
+      <button type="submit" class="primary">Salvar</button>
+    </form>
+  </section>
+
+  <div id="app" class="layout" hidden>
+    <aside class="sidebar">
+      <div class="brand">UniMove <span>Admin</span></div>
+      <nav id="nav"></nav>
+      <button id="logout" class="ghost">Sair</button>
+    </aside>
+    <main id="view" class="content"></main>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
