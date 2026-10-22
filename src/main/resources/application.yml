@@ -50,6 +50,11 @@ server:
   # sem isso o container escuta numa porta que o balanceador nao consulta e o
   # servico nunca fica saudavel. SERVER_PORT continua valendo fora do PaaS.
   port: ${PORT:${SERVER_PORT:8080}}
+  # O TLS termina no Caddy: sem honrar o X-Forwarded-Proto o Swagger anuncia
+  # http:// e o navegador bloqueia a chamada (mixed content). O `native`
+  # (RemoteIpValve) so confia em proxy de IP interno, e a 8080 da VPS so
+  # escuta em 127.0.0.1.
+  forward-headers-strategy: native
   tomcat:
     # Redirect relativo (Location: /docs/login). Absoluto, o Tomcat usaria o
     # esquema/porta internos (http:8080) que nao existem atras do Caddy.
