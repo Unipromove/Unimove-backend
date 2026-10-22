@@ -63,6 +63,19 @@ class SessionAndDocsIT extends IntegrationTestSupport {
         assertThat(admin.get("/swagger-ui/index.html").statusCode()).isEqualTo(200);
     }
 
+    @Test
+    @DisplayName("Swagger atras do Caddy: X-Forwarded-Proto=https vira servidor https; sem o header segue http")
+    void swaggerServerHonorsForwardedProto() throws Exception {
+        Browser admin = browser();
+        admin.login(newUser(Role.ADMIN).getEmail());
+
+        HttpResponse<String> proxied = admin.get("/v3/api-docs", "X-Forwarded-Proto", "https");
+        assertThat(json(proxied).at("/servers/0/url").asText()).isEqualTo("https://localhost");
+
+        HttpResponse<String> direct = admin.get("/v3/api-docs");
+        assertThat(json(direct).at("/servers/0/url").asText()).startsWith("http://localhost:");
+    }
+
     private Browser browser() {
         return new Browser(HttpClient.newBuilder().cookieHandler(new CookieManager()).build());
     }
@@ -76,8 +89,9 @@ class SessionAndDocsIT extends IntegrationTestSupport {
             this.client = client;
         }
 
-        HttpResponse<String> get(String path) {
-            return call(HttpRequest.newBuilder(uri(path)).GET().build());
+        HttpResponse<String> get(String path, String... headers) {
+            HttpRequest.Builder request = HttpRequest.newBuilder(uri(path)).GET();
+            return call(headers.length == 0 ? request.build() : request.headers(headers).build());
         }
 
         HttpResponse<String> login(String email) {
