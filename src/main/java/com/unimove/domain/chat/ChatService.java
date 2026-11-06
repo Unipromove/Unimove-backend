@@ -4,6 +4,8 @@ import com.unimove.domain.chat.dto.ChatMessageResponse;
 import com.unimove.domain.chat.dto.SendChatMessageRequest;
 import com.unimove.domain.ride.RideService;
 import com.unimove.domain.user.Role;
+import com.unimove.domain.user.UserAccountService;
+import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,8 +14,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 @Service
 public class ChatService {
@@ -23,13 +28,16 @@ public class ChatService {
     private final ChatMessageRepository repository;
     private final RideService rideService;
     private final ChatSseHub hub;
+    private final UserAccountService userAccountService;
 
     public ChatService(ChatMessageRepository repository,
                        RideService rideService,
-                       ChatSseHub hub) {
+                       ChatSseHub hub,
+                       UserAccountService userAccountService) {
         this.repository = repository;
         this.rideService = rideService;
         this.hub = hub;
+        this.userAccountService = userAccountService;
     }
 
     @Transactional
@@ -44,7 +52,7 @@ public class ChatService {
         // saveAndFlush força o INSERT pra termos o seq gerado antes de broadcast.
         ChatMessage saved = repository.saveAndFlush(m);
 
-        ChatMessageResponse resp = ChatMessageResponse.from(saved);
+        ChatMessageResponse resp = ChatMessageResponse.from(saved, nameOf(user.userId()));
         hub.broadcast(rideId, resp);
         log.info("Chat ride={} sender={} role={} seq={} len={}",
                 rideId, user.userId(), role, saved.getSeq(), saved.getBody().length());
@@ -54,8 +62,9 @@ public class ChatService {
     @Transactional(readOnly = true)
     public List<ChatMessageResponse> history(AuthenticatedUser user, UUID rideId) {
         rideService.assertChatAllowed(user, rideId);
+        Function<UUID, String> names = senderNames();
         return repository.findByRideIdOrderBySeqAsc(rideId).stream()
-                .map(ChatMessageResponse::from)
+                .map(m -> ChatMessageResponse.from(m, names.apply(m.getSenderId())))
                 .toList();
     }
 
@@ -74,8 +83,9 @@ public class ChatService {
         if (lastEventId != null) {
             List<ChatMessage> missed = repository
                     .findByRideIdAndSeqGreaterThanOrderBySeqAsc(rideId, lastEventId);
+            Function<UUID, String> names = senderNames();
             for (ChatMessage m : missed) {
-                ChatMessageResponse r = ChatMessageResponse.from(m);
+                ChatMessageResponse r = ChatMessageResponse.from(m, names.apply(m.getSenderId()));
                 try {
                     emitter.send(SseEmitter.event()
                             .id(String.valueOf(r.seq()))
@@ -88,5 +98,15 @@ public class ChatService {
             }
         }
         return emitter;
+    }
+
+    private String nameOf(UUID userId) {
+        return userAccountService.findPublicInfo(userId).map(PassengerPublicInfo::firstName).orElse(null);
+    }
+
+    /** Memoiza por remetente: uma conversa tem no maximo dois participantes. */
+    private Function<UUID, String> senderNames() {
+        Map<UUID, String> cache = new HashMap<>();
+        return id -> cache.computeIfAbsent(id, this::nameOf);
     }
 }

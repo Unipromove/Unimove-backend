@@ -12,16 +12,19 @@ public record ChatMessageResponse(
         UUID rideId,
         UUID senderId,
         Role senderRole,
+        String senderName,
         String body,
         Instant createdAt
 ) {
-    public static ChatMessageResponse from(ChatMessage m) {
+    /** @param senderName primeiro nome de quem enviou (null se a conta sumiu). */
+    public static ChatMessageResponse from(ChatMessage m, String senderName) {
         return new ChatMessageResponse(
                 m.getId(),
                 m.getSeq(),
                 m.getRideId(),
                 m.getSenderId(),
                 m.getSenderRole(),
+                senderName,
                 m.getBody(),
                 m.getCreatedAt()
         );

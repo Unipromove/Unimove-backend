@@ -23,6 +23,7 @@ import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RecentDestinationResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
+import com.unimove.domain.ride.dto.RideParticipants;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.RideRouteResponse;
 import com.unimove.domain.ride.dto.RideStatusEvent;
@@ -209,7 +210,7 @@ public class RideService {
                 saved.getId(), passageiro.userId(), saved.getCidade(), category,
                 saved.getStops().size(), preco);
 
-        return RideResponse.from(saved);
+        return toResponse(saved);
     }
 
     /**
@@ -292,7 +293,7 @@ public class RideService {
         log.info("Ride {} confirmada ({}) → AVAILABLE_IN_MURAL", ride.getId(), req.method());
         publishStatus(ride);
         publishMuralAdded(ride);
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional(readOnly = true)
@@ -366,7 +367,7 @@ public class RideService {
                 ride.getId(), motorista.userId(), ride.getPickupEtaMin());
         publishStatus(ride);
         publishMuralRemoved(ride, MuralSseHub.REASON_ACCEPTED);
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        return toResponse(ride);
     }
 
     /**
@@ -395,7 +396,7 @@ public class RideService {
         ride.setStartedAt(Instant.now());
         log.info("Ride {} iniciada pelo motorista {}", ride.getId(), motorista.userId());
         publishStatus(ride);
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -408,7 +409,7 @@ public class RideService {
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
         chatSseHub.closeRide(rideId);
         publishStatus(ride);
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     /**
@@ -448,7 +449,7 @@ public class RideService {
         } else {
             log.info("Ride {}: dinheiro recebido confirmado pelo motorista {}", rideId, motorista.userId());
         }
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -501,7 +502,7 @@ public class RideService {
         if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
             publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
         }
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -526,7 +527,7 @@ public class RideService {
                     rideId, req.recordedAt(), ride.getDriverLocationUpdatedAt());
         }
 
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        return toResponse(ride);
     }
 
     /**
@@ -561,16 +562,21 @@ public class RideService {
                 .orElseThrow(RideNotFoundException::new);
 
         assertParticipant(user, ride);
+        return toResponse(ride);
+    }
 
-        BigDecimal motoristaAvg = null;
-        Integer motoristaCount = null;
-        if (ride.getMotoristaId() != null) {
-            RatingStats stats = userRatingService.getStats(ride.getMotoristaId());
-            motoristaAvg = stats.avg();
-            motoristaCount = stats.count();
-        }
-
-        return RideResponse.from(ride, computeDriverDistanceKm(ride), motoristaAvg, motoristaCount);
+    /**
+     * Response unico para os participantes: o mesmo shape em todas as transicoes.
+     * Antes do aceite nao ha ninguem a apresentar: o mural nunca expoe o
+     * passageiro e o motorista ainda nao existe. Depois, dois lookups por PK.
+     */
+    private RideResponse toResponse(Ride ride) {
+        RideParticipants participants = ride.getMotoristaId() == null
+                ? RideParticipants.NONE
+                : RideParticipants.of(
+                        driverService.findPublicInfo(ride.getMotoristaId()).orElse(null),
+                        userAccountService.findPublicInfo(ride.getPassageiroId()).orElse(null));
+        return RideResponse.from(ride, computeDriverDistanceKm(ride), participants);
     }
 
     /**
@@ -650,7 +656,7 @@ public class RideService {
     @Transactional(readOnly = true)
     public RideResponse getForAdmin(UUID rideId) {
         Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        return toResponse(ride);
     }
 
     /**
@@ -679,7 +685,7 @@ public class RideService {
         if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
             publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
         }
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional

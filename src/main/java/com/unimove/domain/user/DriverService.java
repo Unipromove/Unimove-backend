@@ -51,6 +51,9 @@ public class DriverService {
                 UserAccountService.firstName(u.getName()),
                 d.getVehicleType(),
                 d.getVehiclePlate(),
+                d.getVehicleBrand(),
+                d.getVehicleModel(),
+                d.getVehicleColor(),
                 u.getRatingAvg(),
                 u.getRatingCount()
         ));

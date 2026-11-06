@@ -52,6 +52,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMuralItem(
                 r.id, r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
+                r.origemEndereco, r.destinoEndereco,
                 r.distanciaKm, r.tempoMin, r.preco, r.category, r.paymentMethod, r.cashChangeFor, r.createdAt
             )
             FROM Ride r

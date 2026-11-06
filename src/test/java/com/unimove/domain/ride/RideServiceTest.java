@@ -27,6 +27,8 @@ import com.unimove.domain.user.Role;
 import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.UserRatingService;
 import com.unimove.domain.user.VehicleType;
+import com.unimove.domain.user.dto.DriverPublicInfo;
+import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -840,8 +842,7 @@ class RideServiceTest {
     void getEnforcesAccessControl() {
         Ride ride = rideEnRoute(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
-        when(userRatingService.getStats(mot.userId()))
-                .thenReturn(new RatingStats(new BigDecimal("4.50"), 10));
+        stubParticipants(mot.userId(), pax.userId());
 
         RideResponse fromPax = rideService.get(pax, ride.getId());
         assertThat(fromPax.id()).isEqualTo(ride.getId());
@@ -854,6 +855,54 @@ class RideServiceTest {
                 "x@x.com", Role.MOTORISTA, CIDADE);
         assertThatThrownBy(() -> rideService.get(intruso, ride.getId()))
                 .isInstanceOf(RideAccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("get com corrida aceita: endereco, motorista/veiculo para o passageiro e passageiro para o motorista")
+    void getExposesParticipantsAfterAccept() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        ride.setOrigemEndereco("Praça da Matriz");
+        ride.setDestinoEndereco("Rodoviária");
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        stubParticipants(mot.userId(), pax.userId());
+
+        RideResponse r = rideService.get(pax, ride.getId());
+
+        assertThat(r.origemEndereco()).isEqualTo("Praça da Matriz");
+        assertThat(r.destinoEndereco()).isEqualTo("Rodoviária");
+        assertThat(r.motoristaNome()).isEqualTo("Carlos");
+        assertThat(r.veiculoMarca()).isEqualTo("Fiat");
+        assertThat(r.veiculoModelo()).isEqualTo("Uno");
+        assertThat(r.veiculoCor()).isEqualTo("Prata");
+        assertThat(r.veiculoPlaca()).isEqualTo("ABC1D23");
+        assertThat(r.passageiroNome()).isEqualTo("Ana");
+        assertThat(r.passageiroRatingAvg()).isEqualByComparingTo("4.90");
+        assertThat(r.passageiroRatingCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("get antes do aceite: sem motorista nem passageiro no response (e sem lookups)")
+    void getHidesParticipantsBeforeAccept() {
+        Ride ride = rideEnRoute(pax.userId(), null);
+        ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
+        ride.setOrigemEndereco("Praça da Matriz");
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse r = rideService.get(pax, ride.getId());
+
+        assertThat(r.origemEndereco()).isEqualTo("Praça da Matriz");
+        assertThat(r.motoristaNome()).isNull();
+        assertThat(r.veiculoPlaca()).isNull();
+        assertThat(r.passageiroNome()).isNull();
+        verify(driverService, never()).findPublicInfo(any());
+        verify(userAccountService, never()).findPublicInfo(any());
+    }
+
+    private void stubParticipants(UUID motoristaId, UUID passageiroId) {
+        when(driverService.findPublicInfo(motoristaId)).thenReturn(Optional.of(new DriverPublicInfo(
+                "Carlos", VehicleType.CARRO, "ABC1D23", "Fiat", "Uno", "Prata", new BigDecimal("4.50"), 10)));
+        when(userAccountService.findPublicInfo(passageiroId)).thenReturn(Optional.of(
+                new PassengerPublicInfo("Ana", new BigDecimal("4.90"), 3)));
     }
 
     @Test

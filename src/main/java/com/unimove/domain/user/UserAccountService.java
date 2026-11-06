@@ -40,7 +40,7 @@ public class UserAccountService implements UserDirectory, AccountStatusChecker {
     @Transactional(readOnly = true)
     public Optional<PassengerPublicInfo> findPublicInfo(UUID userId) {
         return userRepository.findById(userId)
-                .map(u -> new PassengerPublicInfo(firstName(u.getName())));
+                .map(u -> new PassengerPublicInfo(firstName(u.getName()), u.getRatingAvg(), u.getRatingCount()));
     }
 
     @Transactional(readOnly = true)

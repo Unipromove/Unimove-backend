@@ -14,6 +14,8 @@ public record RideMuralItem(
         BigDecimal lngOrigem,
         BigDecimal latDestino,
         BigDecimal lngDestino,
+        String origemEndereco,
+        String destinoEndereco,
         BigDecimal distanciaKm,
         Integer tempoMin,
         BigDecimal preco,
@@ -30,6 +32,7 @@ public record RideMuralItem(
                 ride.getId(),
                 ride.getLatOrigem(), ride.getLngOrigem(),
                 ride.getLatDestino(), ride.getLngDestino(),
+                ride.getOrigemEndereco(), ride.getDestinoEndereco(),
                 ride.getDistanciaKm(), ride.getTempoMin(), ride.getPreco(),
                 ride.getCategory(), ride.getPaymentMethod(), ride.getCashChangeFor(), ride.getCreatedAt());
     }
