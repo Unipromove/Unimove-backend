@@ -5,7 +5,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -18,19 +20,29 @@ import java.util.Optional;
  * parciais nao sao cacheaveis (o app faz debounce). Reverse (pin → endereco) e cacheado
  * por coordenada arredondada, igual ao route_cache (regra 11). Erros do provedor viram
  * {@link MapsUnavailableException} (HTTP 503), ja tratado pelo GlobalExceptionHandler.
+ *
+ * Com o lat/lng do app, o forward vai com {@code bbox} em volta do ponto: o vies
+ * de lat/lon sozinho so reordena, e "Hospital" voltava com a Espanha. Falha
+ * transitoria (DNS, conexao, 5xx) ganha uma nova tentativa curta antes do 503.
  */
 @Service
 class PhotonGeocodingService implements GeocodingService {
 
     private static final Logger log = LoggerFactory.getLogger(PhotonGeocodingService.class);
+    /** Teto do request inteiro, nova tentativa incluida: o app nao espera mais que isso. */
     private static final Duration BLOCK_TIMEOUT = Duration.ofSeconds(6);
+    private static final Duration RETRY_BACKOFF = Duration.ofMillis(300);
+    private static final double KM_PER_DEGREE = 111.32;
 
     private final WebClient photonWebClient;
     private final GeocodeCacheRepository cacheRepository;
+    private final double searchRadiusKm;
 
-    PhotonGeocodingService(WebClient photonWebClient, GeocodeCacheRepository cacheRepository) {
+    PhotonGeocodingService(WebClient photonWebClient, GeocodeCacheRepository cacheRepository,
+                           PhotonProperties props) {
         this.photonWebClient = photonWebClient;
         this.cacheRepository = cacheRepository;
+        this.searchRadiusKm = props.searchRadiusKm();
     }
 
     @Override
@@ -43,7 +55,8 @@ class PhotonGeocodingService implements GeocodingService {
                     .queryParam("q", query)
                     .queryParam("limit", limit);
             if (biasLat != null && biasLng != null) {
-                uri.queryParam("lat", biasLat).queryParam("lon", biasLng);
+                uri.queryParam("lat", biasLat).queryParam("lon", biasLng)
+                        .queryParam("bbox", bbox(biasLat, biasLng));
             }
             return uri.build();
         });
@@ -88,6 +101,11 @@ class PhotonGeocodingService implements GeocodingService {
                     .uri(uriFn::build)
                     .retrieve()
                     .bodyToMono(PhotonResponse.class)
+                    .retryWhen(Retry.backoff(1, RETRY_BACKOFF)
+                            .filter(PhotonGeocodingService::isTransient)
+                            .doBeforeRetry(s -> log.warn("Photon falhou ({}), tentando de novo",
+                                    s.failure().toString()))
+                            .onRetryExhaustedThrow((spec, s) -> s.failure()))
                     .block(BLOCK_TIMEOUT);
         } catch (WebClientResponseException e) {
             log.error("Photon retornou status {} para geocoding", e.getStatusCode());
@@ -96,6 +114,21 @@ class PhotonGeocodingService implements GeocodingService {
             log.error("Falha ao chamar Photon", e);
             throw new MapsUnavailableException("Servico de busca de endereco indisponivel.", e);
         }
+    }
+
+    /** DNS/conexao/timeout e 5xx passam; 4xx e erro nosso e nao melhora tentando de novo. */
+    private static boolean isTransient(Throwable t) {
+        return t instanceof WebClientRequestException
+                || (t instanceof WebClientResponseException e && e.getStatusCode().is5xxServerError());
+    }
+
+    /** "minLon,minLat,maxLon,maxLat" de uma caixa de +-searchRadiusKm em volta do ponto. */
+    private String bbox(double lat, double lng) {
+        double dLat = searchRadiusKm / KM_PER_DEGREE;
+        double dLng = searchRadiusKm / (KM_PER_DEGREE * Math.max(Math.cos(Math.toRadians(lat)), 0.01));
+        return String.format(java.util.Locale.ROOT, "%.5f,%.5f,%.5f,%.5f",
+                Math.max(lng - dLng, -180), Math.max(lat - dLat, -90),
+                Math.min(lng + dLng, 180), Math.min(lat + dLat, 90));
     }
 
     @FunctionalInterface
