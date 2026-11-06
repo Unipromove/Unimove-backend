@@ -55,7 +55,7 @@ public class RideShareService {
         assertShareable(ride);
 
         PassengerPublicInfo passenger = userAccountService.findPublicInfo(ride.getPassageiroId())
-                .orElse(new PassengerPublicInfo(null));
+                .orElse(new PassengerPublicInfo(null, null, null));
 
         DriverPublicInfo driver = ride.getMotoristaId() == null
                 ? null

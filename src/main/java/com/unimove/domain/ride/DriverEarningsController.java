@@ -29,6 +29,6 @@ public class DriverEarningsController {
                                      @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
                                      @RequestParam(required = false)
                                      @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return rideService.getDriverEarnings(user.userId(), from, to);
+        return rideService.getDriverEarnings(user, from, to);
     }
 }

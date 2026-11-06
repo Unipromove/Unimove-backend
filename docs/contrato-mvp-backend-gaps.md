@@ -140,3 +140,29 @@ O backend usa 3 estados por envio e um consolidado derivado. Não existe `UNDER_
 - Token de recuperação não cadastra conta nem troca telefone, e token de cadastro não redefine senha: os dois casos → 400. Token vencido ou já usado → 400.
 - Conta criada pelo Google (sem senha) ganha senha e passa a entrar das duas formas.
 - O reset pelo admin (`/admin/users/{id}/reset-password`) continua para quem perdeu o número.
+## 10. Quinto ciclo (teste de campo em Remanso, 06/11/2026) ✅ concluído
+
+Nenhuma mudança quebra o app: só entram campos novos. Um campo mudou de significado (`cashReceived`, item 3).
+
+### 1. Corrida com endereço e com as pessoas
+- `RideResponse` (todas as rotas que devolvem a corrida: `GET /rides/{id}`, aceite, início, conclusão, GPS, cancelamento, dinheiro) ganha `origemEndereco` e `destinoEndereco`.
+- **A partir do aceite**, entram também:
+  - para o passageiro reconhecer o carro: `motoristaNome` (primeiro nome), `veiculoMarca`, `veiculoModelo`, `veiculoCor`, `veiculoPlaca`, `motoristaRatingAvg`, `motoristaRatingCount`;
+  - para o motorista: `passageiroNome` (primeiro nome), `passageiroRatingAvg`, `passageiroRatingCount`.
+  - Antes do aceite, todos esses campos vêm `null`. O mural nunca mostra o passageiro.
+- `GET /rides/mural`, o `snapshot` e o evento `ride-added` de `/rides/mural/stream` ganham `origemEndereco` e `destinoEndereco`, que podem vir `null` quando o passageiro não informou o endereço.
+- Chat: cada mensagem (`GET`/`POST /chat/rides/{id}/messages` e o SSE) traz `senderName` (primeiro nome), além de `senderRole`.
+
+### 2. Ganhos no dia da cidade
+- `GET /drivers/me/earnings`: `from`/`to`, o "hoje" padrão e o agrupamento de `byDay` seguem o fuso da cidade do motorista (Remanso: `America/Bahia`), e não UTC. A corrida concluída às 23h agora conta no mesmo dia.
+- O mesmo vale para `/admin/rides` (fuso da cidade filtrada) e `/admin/metrics` (fuso padrão `America/Sao_Paulo`).
+- Admin: `POST /admin/cities` aceita `timeZone` opcional (IANA, ex.: `America/Cuiaba`; inválido → 400). `GET /admin/cities` devolve `timeZone`.
+
+### 3. Dinheiro recebido sem o troco
+- `payments.cashReceived` passou a ser o **valor das corridas** em dinheiro confirmadas (somado ao valor efetivamente recebido nas divergentes). Antes era a nota entregue. Corrida de R$ 9,40 paga com R$ 20 → conta R$ 9,40.
+- Novo `payments.cashChangeReturned`: troco devolvido no período (R$ 10,60 no exemplo).
+- `cashConfirmed` do `/admin/metrics` segue a mesma regra.
+
+### 4. Busca de endereço
+- `GET /maps/geocode` com `lat`/`lng`: os resultados ficam restritos a uma caixa de ±30 km em volta do ponto (`PHOTON_SEARCH_RADIUS_KM`). **O app deve sempre mandar `lat`/`lng`**; sem eles a busca segue global.
+- Falha momentânea do provedor (DNS, conexão, 5xx) ganha uma nova tentativa antes do 503.

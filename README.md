@@ -62,7 +62,7 @@ IT_DATABASE_URL=jdbc:postgresql://localhost:55432/postgres ./mvnw verify
 docker stop unimove-it
 ```
 
-(`IT_DATABASE_USER`/`IT_DATABASE_PASSWORD` tem default `postgres`/`it`. Testcontainers nao e usado porque nao roda no Docker Desktop do time.) No CI um Postgres 16 de servico roda os IT em todo PR.
+(`IT_DATABASE_USER`/`IT_DATABASE_PASSWORD` tem default `postgres`/`it`. Se o Windows recusar a porta 55432 — faixa reservada pelo Hyper-V, erro `access permissions` —, use outra, ex.: `-p 127.0.0.1:15432:5432`. Testcontainers nao e usado porque nao roda no Docker Desktop do time.) No CI um Postgres 16 de servico roda os IT em todo PR.
 
 Os IT de contrato (`AuthContractIT`, `RideJourneyIT`) sao a referencia do que o app consome; a matriz RF/RNF com a evidencia de cada requisito esta em [`docs/matriz-requisitos-mvp.md`](./docs/matriz-requisitos-mvp.md).
 
@@ -120,7 +120,7 @@ com.unimove
 - **Deploy:** [`docs/deploy-vps.md`](./docs/deploy-vps.md) — VPS Hetzner, auto-deploy, backup, rollback e operacao.
 - **Homologação / runbook:** [`docs/homologacao-runbook.md`](./docs/homologacao-runbook.md) — checagens antes de aplicar V23–V28, bucket de documentos, smoke autenticado, backup e rollback.
 - **LGPD — inventário de dados:** [`docs/lgpd-inventario-dados.md`](./docs/lgpd-inventario-dados.md) — o que coletamos, por quê, com quem compartilhamos, retenção e como atender o titular.
-- **Contrato das novidades para o app:** [`docs/contrato-mvp-backend-gaps.md`](./docs/contrato-mvp-backend-gaps.md) — endpoints e campos novos/alterados desta versão (cadastro com `termsVersion`, documentos, dinheiro, GPS, privacidade).
+- **Contrato das novidades para o app:** [`docs/contrato-mvp-backend-gaps.md`](./docs/contrato-mvp-backend-gaps.md) — endpoints e campos novos/alterados desta versão (cadastro com `termsVersion`, documentos, dinheiro, GPS, privacidade; seção 10: endereços/participantes na corrida, ganhos no fuso da cidade, dinheiro sem troco, busca regional).
 
 ---
 
@@ -135,6 +135,8 @@ com.unimove
 | `JWT_EXPIRATION_MS`   | `86400000` (24h)                   | nao         |
 | `OSRM_BASE_URL`       | `https://router.project-osrm.org`  | nao         |
 | `PHOTON_BASE_URL`     | `https://photon.komoot.io`         | nao         |
+| `PHOTON_SEARCH_RADIUS_KM` | `30`                           | nao — meia-largura da caixa (bbox) da busca de endereco em volta do lat/lng do app |
+| `APP_DEFAULT_TIME_ZONE` | `America/Sao_Paulo`              | nao — fuso das visoes globais do admin; cada cidade tem o seu (`served_cities.time_zone`) |
 | `SPRING_PROFILES_ACTIVE` | `dev`                           | nao         |
 | `PHONE_VERIFICATION_CHANNEL` | `LOG`                       | nao — use `WHATSAPP` em producao |
 | `WHATSAPP_BUSINESS_NUMBER` | —                             | so com `channel=WHATSAPP` |
@@ -219,7 +221,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Bloco                       | Status        | Observacoes |
 |-----------------------------|---------------|-------------|
 | Scaffold (pom, profiles)    | concluido     | Spring Boot 3.3.5 + Java 21 |
-| Schema (`V1`-`V36`)         | concluido     | V36 proposito do desafio de telefone (recuperacao de senha). V33 um unico envio de documento em analise por tipo (indice parcial), V34 pagamento/categoria preferidos, V35 placas normalizadas. V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
+| Schema (`V1`-`V37`)         | concluido     | V37 fuso de cada cidade (`served_cities.time_zone`; cidades `-ba` em `America/Bahia`). V36 proposito do desafio de telefone (recuperacao de senha). V33 um unico envio de documento em analise por tipo (indice parcial), V34 pagamento/categoria preferidos, V35 placas normalizadas. V29 revogacao de sessao/senha temporaria, V30 cancelamento admin, V31 CPF/CNH cifrados, V32 notificacoes. V23–V28: corrida ativa unica no banco, precisao do GPS, pagamento em dinheiro, auditoria admin, documentos do motorista, consentimento/exclusao (LGPD). |
 | Schema ate `V22`            | concluido     | served_cities, users (com `status`, `phone_verified_at`, telefone unico e `password_hash` nullable p/ conta social), social_identities, phone_verifications, drivers, rides (com `@Version`, `share_token`, `route_geometry` e `surge_multiplier`), route_cache (com `geometry`), ride_ratings, saved_places, cancellation_fee, category, pricing_configs (com `surge_enabled`/`surge_cap`), chat_messages, ride_stops, geocode_cache |
 | `shared` (security, JWT, exception handler) | concluido | `GlobalExceptionHandler` cobre validacao, JSON ilegivel/enum invalido (400), lock otimista, `BusinessException` |
 | `domain.user`               | concluido     | `/auth/*`, online/offline, admin approve, `/saved-places`, denormalizacao de rating, **suspensao/reativacao via `/admin/users/*`** |
@@ -233,7 +235,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Estimativa de preço         | concluido     | `POST /rides/estimate` reusa OSRM + cache + `PricingPolicy` (cidade-aware) sem persistir |
 | Rating bidirecional         | concluido     | `POST /rides/{id}/rating`, denormalizacao `rating_avg`/`rating_count` em `users` |
 | Endereços favoritos         | concluido     | `POST/GET/DELETE /saved-places` (PASSAGEIRO) |
-| Earnings do motorista       | concluido     | `GET /drivers/me/earnings?from=&to=` com breakdown por dia |
+| Earnings do motorista       | concluido     | `GET /drivers/me/earnings?from=&to=` com breakdown por dia **no fuso da cidade** (nao UTC). `cashReceived` soma o valor das corridas (sem o troco) e `cashChangeReturned` traz o troco devolvido |
 | Painel de metricas (admin)  | concluido     | `GET /admin/metrics?from=&to=` — corridas, receita e usuarios + serie diaria; periodo por `created_at`, default 30 dias |
 | Taxa de cancelamento        | concluido     | `CancellationPolicy` — R$ 3,00 após 120s de `DRIVER_EN_ROUTE` (passageiro) |
 | Categorias MOTO/CARRO       | concluido     | Matching server-side no mural + accept, coeficientes por categoria |
@@ -257,7 +259,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 | Chat in-app via SSE         | concluido     | `chat_messages.seq BIGSERIAL` + `Last-Event-ID` pra reconexao; heartbeat 15s |
 | Multiplas paradas           | concluido     | `stops` (max 5) em `POST /rides`/`/estimate`; tabela `ride_stops`; rota como sequencia de waypoints |
 | Geometria da rota (mapa)    | concluido     | OSRM `overview=full&geometries=polyline`; `GET /rides/{id}/route`, polyline no estimate/share; `route_geometry` + `route_cache.geometry` |
-| Busca de endereco (geocoding) | concluido   | `GET /maps/geocode` (autocomplete) + `GET /maps/reverse` (pin) via Photon; `reverse` cacheado em `geocode_cache` |
+| Busca de endereco (geocoding) | concluido   | `GET /maps/geocode` (autocomplete) + `GET /maps/reverse` (pin) via Photon; `reverse` cacheado em `geocode_cache`. Com `lat`/`lng`, busca restrita a bbox de ±30 km; falha transitoria (DNS/conexao/5xx) tenta de novo uma vez antes do 503 |
 | Painel de admin             | concluido     | HTML+JS estatico em `/painel/` (sem build, sem CDN, CSP restrita), servido pelo proprio backend. Ver `docs/painel-admin.md` |
 | OpenAPI / Swagger UI        | concluido     | `springdoc-openapi` em `/swagger-ui.html`, so para ADMIN via login em `/docs/login` (cadeia de seguranca propria com sessao + CSRF; a API segue stateless) |
 | Coleção HTTP / smoke test   | concluido     | `docs/api.http` + `scripts/smoke.sh` |
@@ -266,7 +268,7 @@ Backend em **estado MVP-funcional** — todos os endpoints da matriz da `CLAUDE.
 
 ### Testes
 
-Cobertura atual (`mvn test`) — **506 testes unitarios** + **27 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Cards MVP de 10/10/2026: `AuthContractIT` (cadastro real com desafio WhatsApp, token de uso unico, cidade por slug, 401/403, recuperacao de senha pelo WhatsApp), `RideJourneyIT` (jornada passageiro × 2 motoristas × admin com SSE e chat reais, piloto so dinheiro), `ObservabilityIT` (health/probes/info) e `DestructiveMigrationGuardTest` (trava da V19). Go/No-Go do piloto em [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
+Cobertura atual (`mvn test`) — **515 testes unitarios** + **31 de integracao** (`mvn verify` com `IT_DATABASE_URL`). Teste de campo de 06/11/2026: `RideDetailsAndEarningsIT` (enderecos e participantes no `RideResponse`/mural/chat, ganhos no dia local de Remanso com `AT TIME ZONE`, dinheiro sem troco, `timeZone` em `/admin/cities`), `ChatServiceTest` (`senderName`) e casos novos em `RideServiceTest`, `PhotonGeocodingServiceTest` (bbox, nova tentativa, 4xx sem nova tentativa), `CityCatalogServiceTest` e `AdminMetricsServiceTest`. Cards MVP de 10/10/2026: `AuthContractIT` (cadastro real com desafio WhatsApp, token de uso unico, cidade por slug, 401/403, recuperacao de senha pelo WhatsApp), `RideJourneyIT` (jornada passageiro × 2 motoristas × admin com SSE e chat reais, piloto so dinheiro), `ObservabilityIT` (health/probes/info) e `DestructiveMigrationGuardTest` (trava da V19). Go/No-Go do piloto em [`docs/go-no-go-piloto.md`](./docs/go-no-go-piloto.md). Reauditoria de 10/10/2026: `RideIT` (aceite concorrente por dois motoristas → 200/409, clique duplo no pedido, `?sort=` invalido → 400, link de compartilhamento), `DriverDocumentIT` (envio duplicado concorrente → 201/409), `SessionAndDocsIT` (revogacao por troca de cidade, login do Swagger), alem de `RideShareServiceTest`, `DocsAuthenticationProviderTest`, `DocsSecurityWebMvcTest`, `VehiclePlateTest` e `GlobalExceptionHandlerTest`. Segundo ciclo: `NotificationServiceTest`, `FieldCryptoTest`, `FieldCryptoSpringWiringTest`, `CnhTest`, `UserStreamRegistryTest`, `ClientIpTest`, `RideRetentionSchedulerTest`, `DocumentRetentionSchedulerTest`, `AdminRideControllerWebMvcTest` e casos novos nos testes de servico. Primeiro ciclo:
 
 - `SecurityWebMvcTest` — cadeia de seguranca real: 401 sem/token adulterado, 403 por role, conta suspensa (403) e excluida (401) com token ainda valido, rota publica com token bloqueado, acesso cruzado (BOLA)
 - `RateLimitFilterTest`, `UserAccountServiceTest`, `DriverServiceTest`, `AdminAuditServiceTest`
@@ -290,7 +292,7 @@ Ja existentes:
 - `CityNormalizerTest` — normalizacao de cidade
 - `RouteHasherTest` — hash deterministico das rotas OSRM
 - `OsrmMapsServiceTest` — cache hit/miss (incl. backfill de geometria), OSRM 5xx, payload vazio, race no insert, polyline persistida
-- `PhotonGeocodingServiceTest` — forward (sugestões + bias lat/lon), query vazia sem chamada, reverse cache miss/hit, Photon 5xx → 503, sem features → 503
+- `PhotonGeocodingServiceTest` — forward (sugestões + bias lat/lon + bbox regional), falha de DNS momentânea → nova tentativa, persistente → 503, 4xx sem nova tentativa, query vazia sem chamada, reverse cache miss/hit, Photon 5xx → 503, sem features → 503
 - `RideServiceTest` (Mockito) — máquina de estados ponta-a-ponta, regras de role no cancelamento, gating do `driver-location`, delegação do mural por cidade + categoria, invariante de preço calculado no backend a partir do OSRM, submitRating cross-role, paradas, geometria da rota, pickup ETA e surge
 - `SurgePolicyTest` — ladder por faixa, teto (`surge_cap`), oferta = 0 → teto, `surge_enabled = false` → 1.0x, cidade/categoria sem demanda → 1.0x
 - `RideExpirationSchedulerTest` — expiração de corridas paradas no mural (EXPIRED)

@@ -42,10 +42,11 @@ public class AdminCityController {
     @PostMapping
     @Operation(summary = "Abre (ou reabre) uma cidade",
             description = "O slug vem da normalização do nome informado. 201 quando a cidade é nova, "
-                    + "200 quando uma cidade desativada é reativada.")
+                    + "200 quando uma cidade desativada é reativada. `timeZone` (IANA, ex.: America/Bahia) "
+                    + "é opcional: define o dia dos ganhos e relatórios.")
     public ResponseEntity<AdminCityItem> open(@AuthenticationPrincipal AuthenticatedUser admin,
                                               @Valid @RequestBody OpenCityRequest req) {
-        CityCatalogService.OpenResult result = service.open(admin.userId(), req.cidade());
+        CityCatalogService.OpenResult result = service.open(admin.userId(), req.cidade(), req.timeZone());
         return ResponseEntity
                 .status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
                 .body(result.city());

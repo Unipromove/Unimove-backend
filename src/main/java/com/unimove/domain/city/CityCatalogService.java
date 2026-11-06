@@ -8,9 +8,12 @@ import com.unimove.domain.user.UserDirectory;
 import com.unimove.shared.util.CityNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,12 +30,15 @@ public class CityCatalogService implements CityCatalog {
     private final ServedCityRepository repository;
     private final UserDirectory userDirectory;
     private final AdminAuditLog auditLog;
+    private final ZoneId defaultZone;
 
     public CityCatalogService(ServedCityRepository repository, UserDirectory userDirectory,
-                              AdminAuditLog auditLog) {
+                              AdminAuditLog auditLog,
+                              @Value("${app.city.default-time-zone:America/Sao_Paulo}") String defaultTimeZone) {
         this.repository = repository;
         this.userDirectory = userDirectory;
         this.auditLog = auditLog;
+        this.defaultZone = ZoneId.of(defaultTimeZone);
     }
 
     @Override
@@ -51,11 +57,23 @@ public class CityCatalogService implements CityCatalog {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ZoneId zoneOf(String slug) {
+        return repository.findById(slug == null ? "" : slug)
+                .map(c -> ZoneId.of(c.getTimeZone()))
+                .orElse(defaultZone);
+    }
+
+    @Override
+    public ZoneId defaultZone() {
+        return defaultZone;
+    }
+
     @Transactional(readOnly = true)
     public List<AdminCityItem> listAll() {
         return repository.findAllByOrderByDisplayNameAsc().stream()
-                .map(c -> new AdminCityItem(c.getSlug(), c.getDisplayName(), c.isActive(),
-                        userDirectory.countByCidade(c.getSlug())))
+                .map(this::toAdminItem)
                 .toList();
     }
 
@@ -66,17 +84,22 @@ public class CityCatalogService implements CityCatalog {
      * {@code rides.cidade} de quem opera ali.
      */
     @Transactional
-    public OpenResult open(UUID adminId, String cidade) {
+    public OpenResult open(UUID adminId, String cidade, String timeZone) {
         String slug = CityNormalizer.normalize(cidade);
         if (slug == null || slug.isEmpty()) {
             throw new InvalidCityNameException();
         }
+        String zone = timeZone == null || timeZone.isBlank() ? null : validZone(timeZone.trim());
 
         ServedCity city = repository.findById(slug).orElse(null);
         boolean created = city == null;
         if (created) {
             city = new ServedCity();
             city.setSlug(slug);
+            city.setTimeZone(defaultZone.getId());
+        }
+        if (zone != null) {
+            city.setTimeZone(zone);
         }
         city.setDisplayName(cidade.trim());
         city.setActive(true);
@@ -106,8 +129,16 @@ public class CityCatalogService implements CityCatalog {
                 resolved, adminId, userDirectory.countByCidade(resolved));
     }
 
+    private static String validZone(String timeZone) {
+        try {
+            return ZoneId.of(timeZone).getId();
+        } catch (DateTimeException e) {
+            throw new InvalidTimeZoneException();
+        }
+    }
+
     private AdminCityItem toAdminItem(ServedCity city) {
-        return new AdminCityItem(city.getSlug(), city.getDisplayName(), city.isActive(),
+        return new AdminCityItem(city.getSlug(), city.getDisplayName(), city.getTimeZone(), city.isActive(),
                 userDirectory.countByCidade(city.getSlug()));
     }
 

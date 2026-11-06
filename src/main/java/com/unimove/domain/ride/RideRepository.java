@@ -52,6 +52,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query("""
             SELECT new com.unimove.domain.ride.dto.RideMuralItem(
                 r.id, r.latOrigem, r.lngOrigem, r.latDestino, r.lngDestino,
+                r.origemEndereco, r.destinoEndereco,
                 r.distanciaKm, r.tempoMin, r.preco, r.category, r.paymentMethod, r.cashChangeFor, r.createdAt
             )
             FROM Ride r
@@ -206,12 +207,20 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             """)
     List<RideHistoryItem> findAllForParticipant(@Param("userId") UUID userId);
 
+    /**
+     * Extrato do motorista. Dinheiro recebido e o valor da corrida, nao a nota
+     * entregue: cashReceivedAmount inclui o troco devolvido (corrida de 9,40 paga
+     * com 20 registra 20). Confirmado conta o preco; divergente (recebido a menor)
+     * conta o que de fato entrou. O troco sai separado.
+     */
     @Query("""
             SELECT new com.unimove.domain.ride.dto.EarningsAggregate(
                 COUNT(r), COALESCE(SUM(r.preco), 0),
-                COALESCE(SUM(CASE WHEN r.paymentStatus IN (com.unimove.domain.ride.PaymentStatus.CONFIRMED,
-                                                           com.unimove.domain.ride.PaymentStatus.DIVERGENT)
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED THEN r.preco
+                                  WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT
                                   THEN r.cashReceivedAmount ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED
+                                  THEN r.cashReceivedAmount - r.preco ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
                                   THEN r.preco ELSE 0 END), 0),
                 SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END),
@@ -251,14 +260,14 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     /**
      * Situacao dos recebimentos no periodo (por created_at): dinheiro
-     * confirmado (valor registrado pelo motorista), pendente e divergente, e
+     * confirmado (valor das corridas; o registrado inclui o troco), pendente e divergente, e
      * quantas corridas Pix foram so simuladas — separadas de proposito para o
      * painel nao confundir simulacao com receita.
      */
     @Query("""
             SELECT new com.unimove.domain.ride.dto.PaymentMetricsAggregate(
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED
-                                  THEN r.cashReceivedAmount ELSE 0 END), 0),
+                                  THEN r.preco ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
                           AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END), 0L),
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END), 0L),
@@ -279,22 +288,24 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     }
 
     /**
-     * Série diária do painel admin (por created_at): corridas criadas no dia,
+     * Série diária do painel admin (por created_at, dia no fuso {@code tz}): corridas criadas no dia,
      * quantas concluíram e a receita das concluídas. Espelha o estilo nativo de
-     * {@code findDriverEarningsByDay}.
+     * {@code findDriverEarningsByDay}. Agrupa pelo alias {@code day}: repetir a
+     * expressao com o fuso geraria dois binds e o Postgres recusaria o GROUP BY.
      */
     @Query(value = """
-            SELECT CAST(created_at AS DATE) AS day,
+            SELECT CAST((created_at AT TIME ZONE :tz) AS DATE) AS day,
                    COUNT(*) AS total,
                    SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
                    COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN preco ELSE 0 END), 0) AS revenue
             FROM rides
             WHERE created_at >= :from AND created_at < :to
-            GROUP BY CAST(created_at AS DATE)
+            GROUP BY day
             ORDER BY day
             """, nativeQuery = true)
     List<RideMetricsDayRow> findRideMetricsByDay(@Param("from") Instant from,
-                                                 @Param("to") Instant to);
+                                                 @Param("to") Instant to,
+                                                 @Param("tz") String timeZone);
 
     interface EarningsDayRow {
         java.sql.Date getDay();
@@ -334,8 +345,9 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     List<RecentDestinationRow> findRecentDestinations(@Param("passageiroId") UUID passageiroId,
                                                       @Param("limit") int limit);
 
+    /** Ganhos por dia local da cidade ({@code tz}); agrupa pelo alias, como a serie do painel. */
     @Query(value = """
-            SELECT CAST(completed_at AS DATE) AS day,
+            SELECT CAST((completed_at AT TIME ZONE :tz) AS DATE) AS day,
                    COUNT(*) AS rides,
                    COALESCE(SUM(preco), 0) AS gross
             FROM rides
@@ -343,10 +355,11 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
               AND status = 'COMPLETED'
               AND completed_at >= :from
               AND completed_at <  :to
-            GROUP BY CAST(completed_at AS DATE)
+            GROUP BY day
             ORDER BY day
             """, nativeQuery = true)
     List<EarningsDayRow> findDriverEarningsByDay(@Param("driverId") UUID driverId,
                                                  @Param("from") Instant from,
-                                                 @Param("to") Instant to);
+                                                 @Param("to") Instant to,
+                                                 @Param("tz") String timeZone);
 }

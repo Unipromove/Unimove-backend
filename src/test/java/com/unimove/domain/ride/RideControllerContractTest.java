@@ -174,12 +174,14 @@ class RideControllerContractTest {
     @DisplayName("GET /rides/mural → lista com troco para o motorista se preparar")
     void mural() throws Exception {
         when(rideService.listMural(user)).thenReturn(List.of(new RideMuralItem(rideId,
-                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, 5,
-                new BigDecimal("10.00"), RideCategory.CARRO, PaymentMethod.DINHEIRO, new BigDecimal("50.00"),
+                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, "Praça da Matriz", "Rodoviária",
+                BigDecimal.ONE, 5, new BigDecimal("10.00"), RideCategory.CARRO, PaymentMethod.DINHEIRO, new BigDecimal("50.00"),
                 Instant.now())));
 
         mvc.perform(get("/rides/mural"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].origemEndereco").value("Praça da Matriz"))
+                .andExpect(jsonPath("$[0].destinoEndereco").value("Rodoviária"))
                 .andExpect(jsonPath("$[0].paymentMethod").value("DINHEIRO"))
                 .andExpect(jsonPath("$[0].cashChangeFor").value(50.00));
     }
@@ -344,11 +346,12 @@ class RideControllerContractTest {
 
     private RideResponse ride(RideStatus status) {
         return new RideResponse(rideId, user.userId(), null, "remanso-ba",
-                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, List.of(),
-                new BigDecimal("2.500"), 7, new BigDecimal("12.30"), BigDecimal.ONE, RideCategory.CARRO,
+                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, "Praça da Matriz", "Rodoviária",
+                List.of(), new BigDecimal("2.500"), 7, new BigDecimal("12.30"), BigDecimal.ONE, RideCategory.CARRO,
                 status, PaymentMethod.DINHEIRO, null, PaymentStatus.PENDING, new BigDecimal("50.00"),
-                null, null, null, null, null, null, null, null, null, null, Instant.now(),
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                Instant.now(), null, null, null, null, null, null, null, null);
     }
 
     private RideHistoryItem historyItem() {

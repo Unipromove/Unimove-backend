@@ -28,6 +28,7 @@ class PhotonGeocodingServiceTest {
 
     private static final double LAT = -20.81972;
     private static final double LNG = -49.37944;
+    private static final PhotonProperties PROPS = new PhotonProperties("http://photon.test", 30);
 
     @Test
     void forwardRetornaSugestoes() {
@@ -42,7 +43,7 @@ class PhotonGeocodingServiceTest {
                 """);
         GeocodeCacheRepository repo = mock(GeocodeCacheRepository.class);
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
         List<GeoPlace> results = service.search("avenida brasil 1200", null, null, 5);
 
         assertThat(results).hasSize(2);
@@ -68,11 +69,82 @@ class PhotonGeocodingServiceTest {
         WebClient client = WebClient.builder().baseUrl("http://photon.test").exchangeFunction(exchange).build();
         GeocodeCacheRepository repo = mock(GeocodeCacheRepository.class);
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
         service.search("centro", LAT, LNG, 7);
 
         String query = capturedQuery.get();
         assertThat(query).contains("lat=").contains("lon=").contains("limit=7");
+        // Caixa de +-30 km: ~0,27 grau de latitude, um pouco mais de longitude.
+        assertThat(query).contains("bbox=-49.66776,-21.08921,-49.09112,-20.55023");
+    }
+
+    @Test
+    void forwardSemBiasNaoRestringeRegiao() {
+        AtomicReference<String> capturedQuery = new AtomicReference<>();
+        ExchangeFunction exchange = req -> {
+            capturedQuery.set(req.url().getQuery());
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body("{\"features\":[]}")
+                    .build());
+        };
+        WebClient client = WebClient.builder().baseUrl("http://photon.test").exchangeFunction(exchange).build();
+
+        new PhotonGeocodingService(client, mock(GeocodeCacheRepository.class), PROPS).search("centro", null, null, 5);
+
+        assertThat(capturedQuery.get()).doesNotContain("bbox").doesNotContain("lat=");
+    }
+
+    @Test
+    void falhaDeDnsMomentaneaTentaDeNovoERetornaResultado() {
+        AtomicInteger calls = new AtomicInteger(0);
+        ExchangeFunction exchange = req -> calls.incrementAndGet() == 1
+                ? Mono.error(dnsFailure(req))
+                : Mono.just(ClientResponse.create(HttpStatus.OK)
+                        .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                        .body("{\"features\":[{\"geometry\":{\"coordinates\":[-42.08,-9.62]},"
+                                + "\"properties\":{\"name\":\"Hospital\",\"city\":\"Remanso\"}}]}")
+                        .build());
+        WebClient client = WebClient.builder().baseUrl("http://photon.test").exchangeFunction(exchange).build();
+
+        List<GeoPlace> results = new PhotonGeocodingService(client, mock(GeocodeCacheRepository.class), PROPS)
+                .search("hospital", -9.62, -42.08, 5);
+
+        assertThat(results).extracting(GeoPlace::displayName).containsExactly("Hospital — Remanso");
+        assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void falhaPersistenteViraMapsUnavailableDepoisDeUmaNovaTentativa() {
+        AtomicInteger calls = new AtomicInteger(0);
+        ExchangeFunction exchange = req -> {
+            calls.incrementAndGet();
+            return Mono.error(dnsFailure(req));
+        };
+        WebClient client = WebClient.builder().baseUrl("http://photon.test").exchangeFunction(exchange).build();
+        PhotonGeocodingService service = new PhotonGeocodingService(client, mock(GeocodeCacheRepository.class), PROPS);
+
+        assertThatThrownBy(() -> service.search("hospital", -9.62, -42.08, 5))
+                .isInstanceOf(MapsUnavailableException.class);
+        assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void erro4xxNaoTentaDeNovo() {
+        AtomicInteger calls = new AtomicInteger(0);
+        ExchangeFunction exchange = req -> {
+            calls.incrementAndGet();
+            return Mono.just(ClientResponse.create(HttpStatus.BAD_REQUEST)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body("{}")
+                    .build());
+        };
+        WebClient client = WebClient.builder().baseUrl("http://photon.test").exchangeFunction(exchange).build();
+        PhotonGeocodingService service = new PhotonGeocodingService(client, mock(GeocodeCacheRepository.class), PROPS);
+
+        assertThatThrownBy(() -> service.search("hospital", null, null, 5))
+                .isInstanceOf(MapsUnavailableException.class);
+        assertThat(calls.get()).isEqualTo(1);
     }
 
     @Test
@@ -81,7 +153,7 @@ class PhotonGeocodingServiceTest {
         WebClient client = webClientReturning(calls, "{\"features\":[]}");
         GeocodeCacheRepository repo = mock(GeocodeCacheRepository.class);
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
 
         assertThat(service.search("   ", null, null, 5)).isEmpty();
         assertThat(calls.get()).isZero();
@@ -99,7 +171,7 @@ class PhotonGeocodingServiceTest {
         GeocodeCacheRepository repo = mock(GeocodeCacheRepository.class);
         when(repo.findByCoordHash(any())).thenReturn(Optional.empty());
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
         GeoPlace place = service.reverse(LAT, LNG);
 
         assertThat(place.displayName()).isEqualTo("Avenida Brasil, 1200 — Centro");
@@ -126,7 +198,7 @@ class PhotonGeocodingServiceTest {
         cached.setLng(new BigDecimal("-49.3794400"));
         when(repo.findByCoordHash("-20.8197,-49.3794")).thenReturn(Optional.of(cached));
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
         GeoPlace place = service.reverse(LAT, LNG);
 
         assertThat(place.displayName()).isEqualTo("Avenida Brasil, 1200 — Centro");
@@ -140,7 +212,7 @@ class PhotonGeocodingServiceTest {
         GeocodeCacheRepository repo = mock(GeocodeCacheRepository.class);
         when(repo.findByCoordHash(any())).thenReturn(Optional.empty());
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
 
         assertThatThrownBy(() -> service.reverse(LAT, LNG))
                 .isInstanceOf(MapsUnavailableException.class);
@@ -153,13 +225,20 @@ class PhotonGeocodingServiceTest {
         GeocodeCacheRepository repo = mock(GeocodeCacheRepository.class);
         when(repo.findByCoordHash(any())).thenReturn(Optional.empty());
 
-        PhotonGeocodingService service = new PhotonGeocodingService(client, repo);
+        PhotonGeocodingService service = new PhotonGeocodingService(client, repo, PROPS);
 
         assertThatThrownBy(() -> service.reverse(LAT, LNG))
                 .isInstanceOf(MapsUnavailableException.class);
     }
 
     // ---- helpers ----------------------------------------------------------
+
+    /** Como o connector real entrega a falha de DNS: embrulhada em WebClientRequestException. */
+    private static Throwable dnsFailure(org.springframework.web.reactive.function.client.ClientRequest req) {
+        return new org.springframework.web.reactive.function.client.WebClientRequestException(
+                new java.net.UnknownHostException("Failed to resolve 'photon.komoot.io'"),
+                req.method(), req.url(), req.headers());
+    }
 
     private static WebClient webClientReturning(AtomicInteger callCounter, String body) {
         ExchangeFunction exchange = req -> {

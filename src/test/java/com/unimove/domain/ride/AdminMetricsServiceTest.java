@@ -1,10 +1,12 @@
 package com.unimove.domain.ride;
 
+import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.ride.dto.AdminMetricsResponse;
 import com.unimove.domain.ride.dto.PaymentMetricsAggregate;
 import com.unimove.domain.ride.dto.RideMetricsAggregate;
 import com.unimove.domain.user.UserStatsService;
 import com.unimove.domain.user.dto.UserStatsSnapshot;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -15,7 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,8 +43,18 @@ class AdminMetricsServiceTest {
     @Mock
     UserStatsService userStatsService;
 
+    @Mock
+    CityCatalog cityCatalog;
+
+    private static final ZoneId ZONE = ZoneId.of("America/Bahia");
+
     @InjectMocks
     AdminMetricsService service;
+
+    @BeforeEach
+    void stubZone() {
+        lenient().when(cityCatalog.defaultZone()).thenReturn(ZONE);
+    }
 
     private void stubUsers() {
         lenient().when(userStatsService.snapshot())
@@ -56,7 +68,7 @@ class AdminMetricsServiceTest {
         when(rideRepository.aggregateRideMetrics(any(), any()))
                 .thenReturn(new RideMetricsAggregate(10, 6, 2, 1,
                         new BigDecimal("120.00"), new BigDecimal("5.50")));
-        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+        when(rideRepository.findRideMetricsByDay(any(), any(), any())).thenReturn(List.of());
 
         AdminMetricsResponse res = service.getMetrics(
                 LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 10));
@@ -79,11 +91,11 @@ class AdminMetricsServiceTest {
         stubUsers();
         when(rideRepository.aggregateRideMetrics(any(), any()))
                 .thenReturn(new RideMetricsAggregate(0, 0, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO));
-        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+        when(rideRepository.findRideMetricsByDay(any(), any(), any())).thenReturn(List.of());
 
         AdminMetricsResponse res = service.getMetrics(null, null);
 
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate today = LocalDate.now(ZONE);
         assertThat(res.to()).isEqualTo(today);
         assertThat(res.from()).isEqualTo(today.minusDays(29));
 
@@ -92,9 +104,11 @@ class AdminMetricsServiceTest {
         ArgumentCaptor<Instant> toCap = ArgumentCaptor.forClass(Instant.class);
         verify(rideRepository).aggregateRideMetrics(fromCap.capture(), toCap.capture());
         assertThat(toCap.getValue())
-                .isEqualTo(today.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant());
+                .isEqualTo(today.plusDays(1).atStartOfDay(ZONE).toInstant());
         assertThat(fromCap.getValue())
-                .isEqualTo(today.minusDays(29).atStartOfDay(ZoneOffset.UTC).toInstant());
+                .isEqualTo(today.minusDays(29).atStartOfDay(ZONE).toInstant());
+        // Serie diaria agrupada no mesmo fuso (nao em UTC).
+        verify(rideRepository).findRideMetricsByDay(any(), any(), org.mockito.ArgumentMatchers.eq("America/Bahia"));
     }
 
     @Test
@@ -104,7 +118,7 @@ class AdminMetricsServiceTest {
                 .thenReturn(new RideMetricsAggregate(5, 5, 0, 0, new BigDecimal("100.00"), BigDecimal.ZERO));
         when(rideRepository.aggregatePaymentMetrics(any(), any()))
                 .thenReturn(new PaymentMetricsAggregate(new BigDecimal("40.00"), 1L, 1L, 2L));
-        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+        when(rideRepository.findRideMetricsByDay(any(), any(), any())).thenReturn(List.of());
 
         AdminMetricsResponse res = service.getMetrics(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 10));
 
@@ -120,7 +134,7 @@ class AdminMetricsServiceTest {
         when(rideRepository.aggregateRideMetrics(any(), any())).thenReturn(null);
         when(rideRepository.aggregatePaymentMetrics(any(), any()))
                 .thenReturn(new PaymentMetricsAggregate(null, null, null, null));
-        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+        when(rideRepository.findRideMetricsByDay(any(), any(), any())).thenReturn(List.of());
 
         AdminMetricsResponse res = service.getMetrics(null, null);
 
@@ -139,7 +153,7 @@ class AdminMetricsServiceTest {
     void agregadoNuloViraZeros() {
         stubUsers();
         when(rideRepository.aggregateRideMetrics(any(), any())).thenReturn(null);
-        when(rideRepository.findRideMetricsByDay(any(), any())).thenReturn(List.of());
+        when(rideRepository.findRideMetricsByDay(any(), any(), any())).thenReturn(List.of());
 
         AdminMetricsResponse res = service.getMetrics(null, null);
 

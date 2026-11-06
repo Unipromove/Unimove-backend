@@ -8,6 +8,8 @@ import jakarta.validation.constraints.Size;
  * {@code CityNormalizer}, o mesmo usado no cadastro — sao sempre consistentes.
  */
 public record OpenCityRequest(
-        @NotBlank @Size(max = 120) String cidade
+        @NotBlank @Size(max = 120) String cidade,
+        /** Fuso IANA opcional ("America/Bahia"). Ausente: mantem o atual ou usa o padrao. */
+        @Size(max = 64) String timeZone
 ) {
 }

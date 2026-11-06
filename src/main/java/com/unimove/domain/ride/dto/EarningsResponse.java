@@ -20,13 +20,16 @@ public record EarningsResponse(
         PaymentBreakdown payments
 ) {
     /**
-     * @param cashReceived       dinheiro que o motorista registrou ter recebido.
+     * @param cashReceived       dinheiro que ficou com o motorista: o preco das corridas
+     *                           confirmadas e o valor recebido nas divergentes (sem troco).
+     * @param cashChangeReturned troco devolvido aos passageiros (nota entregue − preco).
      * @param cashPending        valor das corridas em dinheiro ainda sem registro.
      * @param cashDivergentRides corridas em dinheiro recebidas a menor.
      * @param pixSimulated       valor das corridas Pix simuladas (sem recebimento real).
      */
     public record PaymentBreakdown(
             BigDecimal cashReceived,
+            BigDecimal cashChangeReturned,
             BigDecimal cashPending,
             long cashDivergentRides,
             BigDecimal pixSimulated

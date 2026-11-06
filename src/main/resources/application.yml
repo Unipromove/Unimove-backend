@@ -61,6 +61,9 @@ server:
     use-relative-redirects: true
 
 app:
+  city:
+    # Fuso das visoes globais do admin; cada cidade tem o seu em served_cities.time_zone.
+    default-time-zone: ${APP_DEFAULT_TIME_ZONE:America/Sao_Paulo}
   payment:
     # Pix sem PSP e so simulado (nenhum dinheiro circula). Piloto e so dinheiro:
     # desligado, confirm-payment PIX responde 409. Ligar quando houver PSP real.
@@ -142,6 +145,8 @@ app:
     base-url: ${OSRM_BASE_URL:https://router.project-osrm.org}
   photon:
     base-url: ${PHOTON_BASE_URL:https://photon.komoot.io}
+    # Busca de endereco restrita a uma caixa de +-N km em volta do lat/lng do app.
+    search-radius-km: ${PHOTON_SEARCH_RADIUS_KM:30}
   ride:
     # Formula de tarifa — centralizada para ajuste facil.
     bandeira: 5.50

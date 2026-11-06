@@ -65,7 +65,7 @@ class RideJourneyIT extends IntegrationTestSupport {
             assertThat(tracked.get("driverCurrentLat").decimalValue()).isEqualByComparingTo("-9.6230");
             assertThat(send(putJson("/rides/" + rideId + "/driver-location", loser, POSITION)).statusCode()).isEqualTo(403);
 
-            try (SseStream chat = openSse("/chat/rides/" + rideId + "/stream", winner)) {
+            try (SseStream chat = openChatSse("/chat/rides/" + rideId + "/stream", winner)) {
                 assertThat(send(postJson("/chat/rides/" + rideId + "/messages", passenger,
                         "{\"body\":\"Estou no portao azul\"}")).statusCode()).isEqualTo(200);
                 chat.await("Estou no portao azul");

@@ -21,7 +21,8 @@ class ChatPrivacyService implements ChatPrivacyPort {
     @Transactional(readOnly = true)
     public List<ChatMessageResponse> exportSentBy(UUID userId) {
         return repository.findBySenderIdOrderByCreatedAtAsc(userId).stream()
-                .map(ChatMessageResponse::from)
+                // So mensagens do proprio titular: o nome ja vai no perfil da exportacao.
+                .map(m -> ChatMessageResponse.from(m, null))
                 .toList();
     }
 

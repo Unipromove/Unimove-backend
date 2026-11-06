@@ -23,6 +23,7 @@ import com.unimove.domain.ride.dto.RatingResponse;
 import com.unimove.domain.ride.dto.RecentDestinationResponse;
 import com.unimove.domain.ride.dto.RideHistoryItem;
 import com.unimove.domain.ride.dto.RideMuralItem;
+import com.unimove.domain.ride.dto.RideParticipants;
 import com.unimove.domain.ride.dto.RideResponse;
 import com.unimove.domain.ride.dto.RideRouteResponse;
 import com.unimove.domain.ride.dto.RideStatusEvent;
@@ -32,6 +33,7 @@ import com.unimove.domain.ride.dto.UpdateDriverLocationRequest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.DriverService;
 import com.unimove.domain.user.RatingStats;
 import com.unimove.domain.user.Role;
@@ -54,7 +56,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -92,6 +94,7 @@ public class RideService {
     private final MuralSseHub muralSseHub;
     private final DriverLocationPolicy driverLocationPolicy;
     private final AdminAuditLog auditLog;
+    private final CityCatalog cityCatalog;
 
     public RideService(RideRepository rideRepository,
                        RideRatingRepository rideRatingRepository,
@@ -107,7 +110,8 @@ public class RideService {
                        RideStatusSseHub statusSseHub,
                        MuralSseHub muralSseHub,
                        DriverLocationPolicy driverLocationPolicy,
-                       AdminAuditLog auditLog) {
+                       AdminAuditLog auditLog,
+                       CityCatalog cityCatalog) {
         this.rideRepository = rideRepository;
         this.rideRatingRepository = rideRatingRepository;
         this.mapsService = mapsService;
@@ -123,6 +127,7 @@ public class RideService {
         this.muralSseHub = muralSseHub;
         this.driverLocationPolicy = driverLocationPolicy;
         this.auditLog = auditLog;
+        this.cityCatalog = cityCatalog;
     }
 
     // Sem @Transactional de proposito: estimate so toca o OSRM (chamada externa)
@@ -209,7 +214,7 @@ public class RideService {
                 saved.getId(), passageiro.userId(), saved.getCidade(), category,
                 saved.getStops().size(), preco);
 
-        return RideResponse.from(saved);
+        return toResponse(saved);
     }
 
     /**
@@ -292,7 +297,7 @@ public class RideService {
         log.info("Ride {} confirmada ({}) → AVAILABLE_IN_MURAL", ride.getId(), req.method());
         publishStatus(ride);
         publishMuralAdded(ride);
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional(readOnly = true)
@@ -366,7 +371,7 @@ public class RideService {
                 ride.getId(), motorista.userId(), ride.getPickupEtaMin());
         publishStatus(ride);
         publishMuralRemoved(ride, MuralSseHub.REASON_ACCEPTED);
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        return toResponse(ride);
     }
 
     /**
@@ -395,7 +400,7 @@ public class RideService {
         ride.setStartedAt(Instant.now());
         log.info("Ride {} iniciada pelo motorista {}", ride.getId(), motorista.userId());
         publishStatus(ride);
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -408,7 +413,7 @@ public class RideService {
         log.info("Ride {} finalizada pelo motorista {}", ride.getId(), motorista.userId());
         chatSseHub.closeRide(rideId);
         publishStatus(ride);
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     /**
@@ -448,7 +453,7 @@ public class RideService {
         } else {
             log.info("Ride {}: dinheiro recebido confirmado pelo motorista {}", rideId, motorista.userId());
         }
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -501,7 +506,7 @@ public class RideService {
         if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
             publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
         }
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -526,7 +531,7 @@ public class RideService {
                     rideId, req.recordedAt(), ride.getDriverLocationUpdatedAt());
         }
 
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        return toResponse(ride);
     }
 
     /**
@@ -561,16 +566,21 @@ public class RideService {
                 .orElseThrow(RideNotFoundException::new);
 
         assertParticipant(user, ride);
+        return toResponse(ride);
+    }
 
-        BigDecimal motoristaAvg = null;
-        Integer motoristaCount = null;
-        if (ride.getMotoristaId() != null) {
-            RatingStats stats = userRatingService.getStats(ride.getMotoristaId());
-            motoristaAvg = stats.avg();
-            motoristaCount = stats.count();
-        }
-
-        return RideResponse.from(ride, computeDriverDistanceKm(ride), motoristaAvg, motoristaCount);
+    /**
+     * Response unico para os participantes: o mesmo shape em todas as transicoes.
+     * Antes do aceite nao ha ninguem a apresentar: o mural nunca expoe o
+     * passageiro e o motorista ainda nao existe. Depois, dois lookups por PK.
+     */
+    private RideResponse toResponse(Ride ride) {
+        RideParticipants participants = ride.getMotoristaId() == null
+                ? RideParticipants.NONE
+                : RideParticipants.of(
+                        driverService.findPublicInfo(ride.getMotoristaId()).orElse(null),
+                        userAccountService.findPublicInfo(ride.getPassageiroId()).orElse(null));
+        return RideResponse.from(ride, computeDriverDistanceKm(ride), participants);
     }
 
     /**
@@ -637,12 +647,14 @@ public class RideService {
     @Transactional(readOnly = true)
     public Page<AdminRideItem> listAdminRides(PaymentStatus paymentStatus, RideStatus status, String cidade,
                                               LocalDate from, LocalDate to, Pageable pageable) {
+        String city = cidade == null || cidade.isBlank() ? null : CityNormalizer.normalize(cidade);
+        // Dia local: da cidade filtrada, senao o fuso padrao das visoes globais.
+        ZoneId zone = city == null ? cityCatalog.defaultZone() : cityCatalog.zoneOf(city);
         // Periodo sempre definido (sem IS NULL em timestamp): ausente = sem limite.
-        Instant fromInstant = from == null ? Instant.EPOCH : from.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant fromInstant = from == null ? Instant.EPOCH : from.atStartOfDay(zone).toInstant();
         Instant toInstant = to == null
                 ? Instant.parse("9999-12-31T00:00:00Z")
-                : to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
-        String city = cidade == null || cidade.isBlank() ? null : CityNormalizer.normalize(cidade);
+                : to.plusDays(1).atStartOfDay(zone).toInstant();
         return rideRepository.findAllForAdmin(paymentStatus, status, city, fromInstant, toInstant, pageable);
     }
 
@@ -650,7 +662,7 @@ public class RideService {
     @Transactional(readOnly = true)
     public RideResponse getForAdmin(UUID rideId) {
         Ride ride = rideRepository.findById(rideId).orElseThrow(RideNotFoundException::new);
-        return RideResponse.from(ride, computeDriverDistanceKm(ride));
+        return toResponse(ride);
     }
 
     /**
@@ -679,7 +691,7 @@ public class RideService {
         if (statusBefore == RideStatus.AVAILABLE_IN_MURAL) {
             publishMuralRemoved(ride, MuralSseHub.REASON_CANCELLED);
         }
-        return RideResponse.from(ride);
+        return toResponse(ride);
     }
 
     @Transactional
@@ -894,8 +906,12 @@ public class RideService {
     }
 
     @Transactional(readOnly = true)
-    public EarningsResponse getDriverEarnings(UUID driverId, LocalDate from, LocalDate to) {
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+    public EarningsResponse getDriverEarnings(AuthenticatedUser motorista, LocalDate from, LocalDate to) {
+        UUID driverId = motorista.userId();
+        // "Hoje" e o dia local da cidade do motorista: em UTC, corrida das 21h
+        // (BRT) em diante caia no dia seguinte.
+        ZoneId zone = cityCatalog.zoneOf(motorista.cidade());
+        LocalDate today = LocalDate.now(zone);
         LocalDate effectiveTo = (to != null) ? to : today;
         LocalDate effectiveFrom = (from != null) ? from : effectiveTo.minusDays(29);
 
@@ -903,14 +919,15 @@ public class RideService {
             throw new InvalidEarningsRangeException();
         }
 
-        Instant fromInstant = effectiveFrom.atStartOfDay(ZoneOffset.UTC).toInstant();
-        Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant fromInstant = effectiveFrom.atStartOfDay(zone).toInstant();
+        Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(zone).toInstant();
 
         EarningsAggregate agg = rideRepository.sumDriverEarnings(driverId, fromInstant, toInstantExclusive);
         EarningsResponse.PaymentBreakdown payments = agg == null
-                ? new EarningsResponse.PaymentBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, 0, BigDecimal.ZERO)
+                ? new EarningsResponse.PaymentBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 0,
+                        BigDecimal.ZERO)
                 : new EarningsResponse.PaymentBreakdown(
-                        orZero(agg.cashReceived()), orZero(agg.cashPending()),
+                        orZero(agg.cashReceived()), orZero(agg.cashChangeReturned()), orZero(agg.cashPending()),
                         agg.cashDivergentRides() == null ? 0 : agg.cashDivergentRides(),
                         orZero(agg.pixSimulated()));
         long total = agg == null ? 0L : agg.totalRides();
@@ -923,7 +940,7 @@ public class RideService {
                 : gross.divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP);
 
         List<EarningsDayItem> byDay = rideRepository
-                .findDriverEarningsByDay(driverId, fromInstant, toInstantExclusive).stream()
+                .findDriverEarningsByDay(driverId, fromInstant, toInstantExclusive, zone.getId()).stream()
                 .map(row -> new EarningsDayItem(
                         row.getDay().toLocalDate(),
                         row.getRides(),

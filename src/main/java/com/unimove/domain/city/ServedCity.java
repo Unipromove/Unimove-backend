@@ -34,6 +34,10 @@ public class ServedCity {
     @Column(name = "display_name", nullable = false, length = 120)
     private String displayName;
 
+    /** Fuso IANA ("America/Bahia"): define o "dia" de ganhos e relatorios. */
+    @Column(name = "time_zone", nullable = false, length = 64)
+    private String timeZone;
+
     @Column(name = "active", nullable = false)
     private boolean active = true;
 

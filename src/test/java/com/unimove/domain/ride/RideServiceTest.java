@@ -27,6 +27,8 @@ import com.unimove.domain.user.Role;
 import com.unimove.domain.user.UserAccountService;
 import com.unimove.domain.user.UserRatingService;
 import com.unimove.domain.user.VehicleType;
+import com.unimove.domain.user.dto.DriverPublicInfo;
+import com.unimove.domain.user.dto.PassengerPublicInfo;
 import com.unimove.shared.security.AuthenticatedUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +44,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -86,6 +89,7 @@ class RideServiceTest {
     @Mock RideStatusSseHub statusSseHub;
     @Mock MuralSseHub muralSseHub;
     @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
+    @Mock com.unimove.domain.city.CityCatalog cityCatalog;
     @Spy DriverLocationPolicy driverLocationPolicy = new DriverLocationPolicy(DriverLocationProperties.defaults());
 
     @InjectMocks RideService rideService;
@@ -757,16 +761,60 @@ class RideServiceTest {
     void earningsBreakdown() {
         when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(
                 new com.unimove.domain.ride.dto.EarningsAggregate(4, new BigDecimal("80.00"),
-                        new BigDecimal("25.00"), new BigDecimal("20.00"), 1L, new BigDecimal("30.00")));
-        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any())).thenReturn(List.of());
+                        new BigDecimal("25.00"), new BigDecimal("10.60"), new BigDecimal("20.00"), 1L,
+                        new BigDecimal("30.00")));
+        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any(), any())).thenReturn(List.of());
+        when(cityCatalog.zoneOf(mot.cidade())).thenReturn(java.time.ZoneId.of("America/Bahia"));
 
-        var resp = rideService.getDriverEarnings(mot.userId(), null, null);
+        var resp = rideService.getDriverEarnings(mot, null, null);
 
         assertThat(resp.grossEarnings()).isEqualByComparingTo("80.00");
         assertThat(resp.payments().cashReceived()).isEqualByComparingTo("25.00");
+        assertThat(resp.payments().cashChangeReturned()).isEqualByComparingTo("10.60");
         assertThat(resp.payments().cashPending()).isEqualByComparingTo("20.00");
         assertThat(resp.payments().cashDivergentRides()).isEqualTo(1);
         assertThat(resp.payments().pixSimulated()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    @DisplayName("earnings corta o dia no fuso da cidade: 23h em Remanso ainda e o mesmo dia (02h UTC do seguinte)")
+    void earningsUsesCityTimeZone() {
+        java.time.ZoneId bahia = java.time.ZoneId.of("America/Bahia");
+        when(cityCatalog.zoneOf(mot.cidade())).thenReturn(bahia);
+        when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(null);
+        LocalDate dia = LocalDate.of(2026, 11, 5);
+        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any(), eq("America/Bahia")))
+                .thenReturn(List.of());
+
+        rideService.getDriverEarnings(mot, dia, dia);
+
+        // [05/11 00:00 BRT, 06/11 00:00 BRT) = [05/11 03:00Z, 06/11 03:00Z): a corrida
+        // concluida as 23h locais (06/11 02:00Z) fica dentro do dia 05.
+        verify(rideRepository).sumDriverEarnings(mot.userId(),
+                Instant.parse("2026-11-05T03:00:00Z"), Instant.parse("2026-11-06T03:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("earnings com periodo invertido → InvalidEarningsRangeException")
+    void earningsRejectsInvertedRange() {
+        when(cityCatalog.zoneOf(mot.cidade())).thenReturn(java.time.ZoneId.of("America/Bahia"));
+
+        assertThatThrownBy(() -> rideService.getDriverEarnings(mot,
+                LocalDate.of(2026, 11, 6), LocalDate.of(2026, 11, 5)))
+                .isInstanceOf(InvalidEarningsRangeException.class);
+    }
+
+    @Test
+    @DisplayName("admin lista corridas: periodo com cidade usa o fuso da cidade")
+    void adminListUsesCityTimeZone() {
+        when(cityCatalog.zoneOf("remanso-ba")).thenReturn(java.time.ZoneId.of("America/Bahia"));
+        LocalDate dia = LocalDate.of(2026, 11, 5);
+
+        rideService.listAdminRides(null, null, "Remanso/BA", dia, dia,
+                org.springframework.data.domain.Pageable.unpaged());
+
+        verify(rideRepository).findAllForAdmin(eq(null), eq(null), eq("remanso-ba"),
+                eq(Instant.parse("2026-11-05T03:00:00Z")), eq(Instant.parse("2026-11-06T03:00:00Z")), any());
     }
 
     @Test
@@ -840,8 +888,7 @@ class RideServiceTest {
     void getEnforcesAccessControl() {
         Ride ride = rideEnRoute(pax.userId(), mot.userId());
         when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
-        when(userRatingService.getStats(mot.userId()))
-                .thenReturn(new RatingStats(new BigDecimal("4.50"), 10));
+        stubParticipants(mot.userId(), pax.userId());
 
         RideResponse fromPax = rideService.get(pax, ride.getId());
         assertThat(fromPax.id()).isEqualTo(ride.getId());
@@ -854,6 +901,54 @@ class RideServiceTest {
                 "x@x.com", Role.MOTORISTA, CIDADE);
         assertThatThrownBy(() -> rideService.get(intruso, ride.getId()))
                 .isInstanceOf(RideAccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("get com corrida aceita: endereco, motorista/veiculo para o passageiro e passageiro para o motorista")
+    void getExposesParticipantsAfterAccept() {
+        Ride ride = rideEnRoute(pax.userId(), mot.userId());
+        ride.setOrigemEndereco("Praça da Matriz");
+        ride.setDestinoEndereco("Rodoviária");
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+        stubParticipants(mot.userId(), pax.userId());
+
+        RideResponse r = rideService.get(pax, ride.getId());
+
+        assertThat(r.origemEndereco()).isEqualTo("Praça da Matriz");
+        assertThat(r.destinoEndereco()).isEqualTo("Rodoviária");
+        assertThat(r.motoristaNome()).isEqualTo("Carlos");
+        assertThat(r.veiculoMarca()).isEqualTo("Fiat");
+        assertThat(r.veiculoModelo()).isEqualTo("Uno");
+        assertThat(r.veiculoCor()).isEqualTo("Prata");
+        assertThat(r.veiculoPlaca()).isEqualTo("ABC1D23");
+        assertThat(r.passageiroNome()).isEqualTo("Ana");
+        assertThat(r.passageiroRatingAvg()).isEqualByComparingTo("4.90");
+        assertThat(r.passageiroRatingCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("get antes do aceite: sem motorista nem passageiro no response (e sem lookups)")
+    void getHidesParticipantsBeforeAccept() {
+        Ride ride = rideEnRoute(pax.userId(), null);
+        ride.setStatus(RideStatus.AVAILABLE_IN_MURAL);
+        ride.setOrigemEndereco("Praça da Matriz");
+        when(rideRepository.findById(ride.getId())).thenReturn(Optional.of(ride));
+
+        RideResponse r = rideService.get(pax, ride.getId());
+
+        assertThat(r.origemEndereco()).isEqualTo("Praça da Matriz");
+        assertThat(r.motoristaNome()).isNull();
+        assertThat(r.veiculoPlaca()).isNull();
+        assertThat(r.passageiroNome()).isNull();
+        verify(driverService, never()).findPublicInfo(any());
+        verify(userAccountService, never()).findPublicInfo(any());
+    }
+
+    private void stubParticipants(UUID motoristaId, UUID passageiroId) {
+        when(driverService.findPublicInfo(motoristaId)).thenReturn(Optional.of(new DriverPublicInfo(
+                "Carlos", VehicleType.CARRO, "ABC1D23", "Fiat", "Uno", "Prata", new BigDecimal("4.50"), 10)));
+        when(userAccountService.findPublicInfo(passageiroId)).thenReturn(Optional.of(
+                new PassengerPublicInfo("Ana", new BigDecimal("4.90"), 3)));
     }
 
     @Test

@@ -21,6 +21,8 @@ public record RideResponse(
         BigDecimal lngOrigem,
         BigDecimal latDestino,
         BigDecimal lngDestino,
+        String origemEndereco,
+        String destinoEndereco,
         List<StopPoint> stops,
         BigDecimal distanciaKm,
         Integer tempoMin,
@@ -40,8 +42,16 @@ public record RideResponse(
         Instant driverLocationUpdatedAt,
         BigDecimal driverDistanceKm,
         Integer pickupEtaMin,
+        String motoristaNome,
+        String veiculoMarca,
+        String veiculoModelo,
+        String veiculoCor,
+        String veiculoPlaca,
         BigDecimal motoristaRatingAvg,
         Integer motoristaRatingCount,
+        String passageiroNome,
+        BigDecimal passageiroRatingAvg,
+        Integer passageiroRatingCount,
         Instant createdAt,
         Instant acceptedAt,
         Instant startedAt,
@@ -52,18 +62,7 @@ public record RideResponse(
         String cancelReason,
         BigDecimal cancellationFee
 ) {
-    public static RideResponse from(Ride r) {
-        return from(r, null, null, null);
-    }
-
-    public static RideResponse from(Ride r, BigDecimal driverDistanceKm) {
-        return from(r, driverDistanceKm, null, null);
-    }
-
-    public static RideResponse from(Ride r,
-                                    BigDecimal driverDistanceKm,
-                                    BigDecimal motoristaRatingAvg,
-                                    Integer motoristaRatingCount) {
+    public static RideResponse from(Ride r, BigDecimal driverDistanceKm, RideParticipants p) {
         List<StopPoint> stops = r.getStops().stream()
                 .map(s -> new StopPoint(s.getLat(), s.getLng()))
                 .toList();
@@ -76,6 +75,8 @@ public record RideResponse(
                 r.getLngOrigem(),
                 r.getLatDestino(),
                 r.getLngDestino(),
+                r.getOrigemEndereco(),
+                r.getDestinoEndereco(),
                 stops,
                 r.getDistanciaKm(),
                 r.getTempoMin(),
@@ -95,8 +96,16 @@ public record RideResponse(
                 r.getDriverLocationUpdatedAt(),
                 driverDistanceKm,
                 r.getPickupEtaMin(),
-                motoristaRatingAvg,
-                motoristaRatingCount,
+                p.motoristaNome(),
+                p.veiculoMarca(),
+                p.veiculoModelo(),
+                p.veiculoCor(),
+                p.veiculoPlaca(),
+                p.motoristaRatingAvg(),
+                p.motoristaRatingCount(),
+                p.passageiroNome(),
+                p.passageiroRatingAvg(),
+                p.passageiroRatingCount(),
                 r.getCreatedAt(),
                 r.getAcceptedAt(),
                 r.getStartedAt(),
