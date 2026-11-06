@@ -207,12 +207,20 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             """)
     List<RideHistoryItem> findAllForParticipant(@Param("userId") UUID userId);
 
+    /**
+     * Extrato do motorista. Dinheiro recebido e o valor da corrida, nao a nota
+     * entregue: cashReceivedAmount inclui o troco devolvido (corrida de 9,40 paga
+     * com 20 registra 20). Confirmado conta o preco; divergente (recebido a menor)
+     * conta o que de fato entrou. O troco sai separado.
+     */
     @Query("""
             SELECT new com.unimove.domain.ride.dto.EarningsAggregate(
                 COUNT(r), COALESCE(SUM(r.preco), 0),
-                COALESCE(SUM(CASE WHEN r.paymentStatus IN (com.unimove.domain.ride.PaymentStatus.CONFIRMED,
-                                                           com.unimove.domain.ride.PaymentStatus.DIVERGENT)
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED THEN r.preco
+                                  WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT
                                   THEN r.cashReceivedAmount ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED
+                                  THEN r.cashReceivedAmount - r.preco ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
                                   THEN r.preco ELSE 0 END), 0),
                 SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END),
@@ -252,14 +260,14 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     /**
      * Situacao dos recebimentos no periodo (por created_at): dinheiro
-     * confirmado (valor registrado pelo motorista), pendente e divergente, e
+     * confirmado (valor das corridas; o registrado inclui o troco), pendente e divergente, e
      * quantas corridas Pix foram so simuladas — separadas de proposito para o
      * painel nao confundir simulacao com receita.
      */
     @Query("""
             SELECT new com.unimove.domain.ride.dto.PaymentMetricsAggregate(
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.CONFIRMED
-                                  THEN r.cashReceivedAmount ELSE 0 END), 0),
+                                  THEN r.preco ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.PENDING
                           AND r.status = com.unimove.domain.ride.RideStatus.COMPLETED THEN 1L ELSE 0L END), 0L),
                 COALESCE(SUM(CASE WHEN r.paymentStatus = com.unimove.domain.ride.PaymentStatus.DIVERGENT THEN 1L ELSE 0L END), 0L),

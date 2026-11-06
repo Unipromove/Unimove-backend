@@ -761,7 +761,8 @@ class RideServiceTest {
     void earningsBreakdown() {
         when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(
                 new com.unimove.domain.ride.dto.EarningsAggregate(4, new BigDecimal("80.00"),
-                        new BigDecimal("25.00"), new BigDecimal("20.00"), 1L, new BigDecimal("30.00")));
+                        new BigDecimal("25.00"), new BigDecimal("10.60"), new BigDecimal("20.00"), 1L,
+                        new BigDecimal("30.00")));
         when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any(), any())).thenReturn(List.of());
         when(cityCatalog.zoneOf(mot.cidade())).thenReturn(java.time.ZoneId.of("America/Bahia"));
 
@@ -769,6 +770,7 @@ class RideServiceTest {
 
         assertThat(resp.grossEarnings()).isEqualByComparingTo("80.00");
         assertThat(resp.payments().cashReceived()).isEqualByComparingTo("25.00");
+        assertThat(resp.payments().cashChangeReturned()).isEqualByComparingTo("10.60");
         assertThat(resp.payments().cashPending()).isEqualByComparingTo("20.00");
         assertThat(resp.payments().cashDivergentRides()).isEqualTo(1);
         assertThat(resp.payments().pixSimulated()).isEqualByComparingTo("30.00");

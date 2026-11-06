@@ -6,11 +6,8 @@ public record EarningsAggregate(
         long totalRides,
         BigDecimal grossEarnings,
         BigDecimal cashReceived,
+        BigDecimal cashChangeReturned,
         BigDecimal cashPending,
         Long cashDivergentRides,
         BigDecimal pixSimulated
-) {
-    public EarningsAggregate(long totalRides, BigDecimal grossEarnings) {
-        this(totalRides, grossEarnings, BigDecimal.ZERO, BigDecimal.ZERO, 0L, BigDecimal.ZERO);
-    }
-}
+) {}

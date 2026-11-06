@@ -924,9 +924,10 @@ public class RideService {
 
         EarningsAggregate agg = rideRepository.sumDriverEarnings(driverId, fromInstant, toInstantExclusive);
         EarningsResponse.PaymentBreakdown payments = agg == null
-                ? new EarningsResponse.PaymentBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, 0, BigDecimal.ZERO)
+                ? new EarningsResponse.PaymentBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 0,
+                        BigDecimal.ZERO)
                 : new EarningsResponse.PaymentBreakdown(
-                        orZero(agg.cashReceived()), orZero(agg.cashPending()),
+                        orZero(agg.cashReceived()), orZero(agg.cashChangeReturned()), orZero(agg.cashPending()),
                         agg.cashDivergentRides() == null ? 0 : agg.cashDivergentRides(),
                         orZero(agg.pixSimulated()));
         long total = agg == null ? 0L : agg.totalRides();
