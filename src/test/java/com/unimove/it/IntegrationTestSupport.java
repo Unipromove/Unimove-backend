@@ -173,8 +173,20 @@ public abstract class IntegrationTestSupport {
 
     /** Abre um stream SSE de verdade; as linhas chegam numa fila lida por {@link SseStream#await}. */
     protected SseStream openSse(String path, String token) {
+        return openSse(request(path, token));
+    }
+
+    /**
+     * Chat: abre com replay ({@code Last-Event-ID: 0}). O sendAsync volta antes de o
+     * servidor registrar o emitter, e uma mensagem enviada nessa janela se perdia.
+     */
+    protected SseStream openChatSse(String path, String token) {
+        return openSse(request(path, token).header("Last-Event-ID", "0"));
+    }
+
+    private SseStream openSse(HttpRequest.Builder request) {
         SseStream sse = new SseStream();
-        http.sendAsync(request(path, token).header("Accept", "text/event-stream").GET().build(),
+        http.sendAsync(request.header("Accept", "text/event-stream").GET().build(),
                         HttpResponse.BodyHandlers.ofLines())
                 .thenAcceptAsync(response -> {
                     sse.body = response.body();
