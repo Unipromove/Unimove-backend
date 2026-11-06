@@ -44,6 +44,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -88,6 +89,7 @@ class RideServiceTest {
     @Mock RideStatusSseHub statusSseHub;
     @Mock MuralSseHub muralSseHub;
     @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
+    @Mock com.unimove.domain.city.CityCatalog cityCatalog;
     @Spy DriverLocationPolicy driverLocationPolicy = new DriverLocationPolicy(DriverLocationProperties.defaults());
 
     @InjectMocks RideService rideService;
@@ -760,15 +762,57 @@ class RideServiceTest {
         when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(
                 new com.unimove.domain.ride.dto.EarningsAggregate(4, new BigDecimal("80.00"),
                         new BigDecimal("25.00"), new BigDecimal("20.00"), 1L, new BigDecimal("30.00")));
-        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any())).thenReturn(List.of());
+        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any(), any())).thenReturn(List.of());
+        when(cityCatalog.zoneOf(mot.cidade())).thenReturn(java.time.ZoneId.of("America/Bahia"));
 
-        var resp = rideService.getDriverEarnings(mot.userId(), null, null);
+        var resp = rideService.getDriverEarnings(mot, null, null);
 
         assertThat(resp.grossEarnings()).isEqualByComparingTo("80.00");
         assertThat(resp.payments().cashReceived()).isEqualByComparingTo("25.00");
         assertThat(resp.payments().cashPending()).isEqualByComparingTo("20.00");
         assertThat(resp.payments().cashDivergentRides()).isEqualTo(1);
         assertThat(resp.payments().pixSimulated()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    @DisplayName("earnings corta o dia no fuso da cidade: 23h em Remanso ainda e o mesmo dia (02h UTC do seguinte)")
+    void earningsUsesCityTimeZone() {
+        java.time.ZoneId bahia = java.time.ZoneId.of("America/Bahia");
+        when(cityCatalog.zoneOf(mot.cidade())).thenReturn(bahia);
+        when(rideRepository.sumDriverEarnings(eq(mot.userId()), any(), any())).thenReturn(null);
+        LocalDate dia = LocalDate.of(2026, 11, 5);
+        when(rideRepository.findDriverEarningsByDay(eq(mot.userId()), any(), any(), eq("America/Bahia")))
+                .thenReturn(List.of());
+
+        rideService.getDriverEarnings(mot, dia, dia);
+
+        // [05/11 00:00 BRT, 06/11 00:00 BRT) = [05/11 03:00Z, 06/11 03:00Z): a corrida
+        // concluida as 23h locais (06/11 02:00Z) fica dentro do dia 05.
+        verify(rideRepository).sumDriverEarnings(mot.userId(),
+                Instant.parse("2026-11-05T03:00:00Z"), Instant.parse("2026-11-06T03:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("earnings com periodo invertido → InvalidEarningsRangeException")
+    void earningsRejectsInvertedRange() {
+        when(cityCatalog.zoneOf(mot.cidade())).thenReturn(java.time.ZoneId.of("America/Bahia"));
+
+        assertThatThrownBy(() -> rideService.getDriverEarnings(mot,
+                LocalDate.of(2026, 11, 6), LocalDate.of(2026, 11, 5)))
+                .isInstanceOf(InvalidEarningsRangeException.class);
+    }
+
+    @Test
+    @DisplayName("admin lista corridas: periodo com cidade usa o fuso da cidade")
+    void adminListUsesCityTimeZone() {
+        when(cityCatalog.zoneOf("remanso-ba")).thenReturn(java.time.ZoneId.of("America/Bahia"));
+        LocalDate dia = LocalDate.of(2026, 11, 5);
+
+        rideService.listAdminRides(null, null, "Remanso/BA", dia, dia,
+                org.springframework.data.domain.Pageable.unpaged());
+
+        verify(rideRepository).findAllForAdmin(eq(null), eq(null), eq("remanso-ba"),
+                eq(Instant.parse("2026-11-05T03:00:00Z")), eq(Instant.parse("2026-11-06T03:00:00Z")), any());
     }
 
     @Test

@@ -3,14 +3,15 @@ package com.unimove.domain.city;
 import com.unimove.domain.city.dto.AdminCityItem;
 import com.unimove.domain.city.dto.CityItem;
 import com.unimove.domain.user.UserDirectory;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,13 +37,19 @@ class CityCatalogServiceTest {
     @Mock UserDirectory userDirectory;
     @Mock com.unimove.domain.audit.AdminAuditLog auditLog;
 
-    @InjectMocks CityCatalogService service;
+    CityCatalogService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new CityCatalogService(repository, userDirectory, auditLog, "America/Sao_Paulo");
+    }
 
     private static ServedCity city(String slug, String displayName, boolean active) {
         ServedCity c = new ServedCity();
         c.setSlug(slug);
         c.setDisplayName(displayName);
         c.setActive(active);
+        c.setTimeZone("America/Bahia");
         return c;
     }
 
@@ -86,7 +93,7 @@ class CityCatalogServiceTest {
         List<AdminCityItem> items = service.listAll();
 
         assertThat(items).containsExactly(
-                new AdminCityItem("casa-nova-ba", "Casa Nova/BA", false, 7L));
+                new AdminCityItem("casa-nova-ba", "Casa Nova/BA", "America/Bahia", false, 7L));
     }
 
     @Test
@@ -94,7 +101,7 @@ class CityCatalogServiceTest {
     void openCreatesNewCity() {
         when(repository.findById("casa-nova-ba")).thenReturn(Optional.empty());
 
-        CityCatalogService.OpenResult result = service.open(ADMIN_ID, "  Casa Nova/BA  ");
+        CityCatalogService.OpenResult result = service.open(ADMIN_ID, "  Casa Nova/BA  ", null);
 
         ArgumentCaptor<ServedCity> captor = ArgumentCaptor.forClass(ServedCity.class);
         verify(repository).save(captor.capture());
@@ -102,6 +109,7 @@ class CityCatalogServiceTest {
         assertThat(saved.getSlug()).isEqualTo("casa-nova-ba");
         assertThat(saved.getDisplayName()).isEqualTo("Casa Nova/BA");
         assertThat(saved.isActive()).isTrue();
+        assertThat(saved.getTimeZone()).isEqualTo("America/Sao_Paulo");
 
         assertThat(result.created()).isTrue();
         assertThat(result.city().slug()).isEqualTo("casa-nova-ba");
@@ -115,8 +123,10 @@ class CityCatalogServiceTest {
         ServedCity existing = city("casa-nova-ba", "Casa Nova", false);
         when(repository.findById("casa-nova-ba")).thenReturn(Optional.of(existing));
 
-        CityCatalogService.OpenResult result = service.open(ADMIN_ID, "Casa Nova/BA");
+        CityCatalogService.OpenResult result = service.open(ADMIN_ID, "Casa Nova/BA", null);
 
+        // Sem timeZone no pedido: mantem o fuso ja cadastrado.
+        assertThat(existing.getTimeZone()).isEqualTo("America/Bahia");
         // O slug é a identidade e já está gravado em users.cidade/rides.cidade.
         assertThat(existing.isActive()).isTrue();
         assertThat(existing.getDisplayName()).isEqualTo("Casa Nova/BA");
@@ -127,11 +137,42 @@ class CityCatalogServiceTest {
     @Test
     @DisplayName("open rejeita nome que não produz slug algum")
     void openRejectsUnnormalizableName() {
-        assertThatThrownBy(() -> service.open(ADMIN_ID, "///"))
+        assertThatThrownBy(() -> service.open(ADMIN_ID, "///", null))
                 .isInstanceOf(InvalidCityNameException.class);
 
         verify(repository, never()).save(any());
         verifyNoInteractions(auditLog);
+    }
+
+    @Test
+    @DisplayName("open com fuso IANA valido grava o fuso informado")
+    void openWithTimeZone() {
+        when(repository.findById("cuiaba-mt")).thenReturn(Optional.empty());
+
+        CityCatalogService.OpenResult result = service.open(ADMIN_ID, "Cuiabá/MT", " America/Cuiaba ");
+
+        assertThat(result.city().timeZone()).isEqualTo("America/Cuiaba");
+    }
+
+    @Test
+    @DisplayName("open rejeita fuso que nao e IANA, sem gravar nada")
+    void openRejectsInvalidTimeZone() {
+        assertThatThrownBy(() -> service.open(ADMIN_ID, "Casa Nova/BA", "Bahia"))
+                .isInstanceOf(InvalidTimeZoneException.class);
+
+        verify(repository, never()).save(any());
+        verifyNoInteractions(auditLog);
+    }
+
+    @Test
+    @DisplayName("zoneOf devolve o fuso da cidade e cai no padrao para cidade desconhecida")
+    void zoneOfFallsBackToDefault() {
+        when(repository.findById("remanso-ba")).thenReturn(Optional.of(city("remanso-ba", "Remanso/BA", true)));
+        when(repository.findById("nao-existe")).thenReturn(Optional.empty());
+
+        assertThat(service.zoneOf("remanso-ba")).isEqualTo(ZoneId.of("America/Bahia"));
+        assertThat(service.zoneOf("nao-existe")).isEqualTo(ZoneId.of("America/Sao_Paulo"));
+        assertThat(service.defaultZone()).isEqualTo(ZoneId.of("America/Sao_Paulo"));
     }
 
     @Test

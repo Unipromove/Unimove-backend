@@ -4,6 +4,7 @@ import com.unimove.domain.ride.dto.AdminMetricsResponse;
 import com.unimove.domain.ride.dto.MetricsDayItem;
 import com.unimove.domain.ride.dto.PaymentMetricsAggregate;
 import com.unimove.domain.ride.dto.RideMetricsAggregate;
+import com.unimove.domain.city.CityCatalog;
 import com.unimove.domain.user.UserStatsService;
 import com.unimove.domain.user.dto.UserStatsSnapshot;
 import org.springframework.stereotype.Service;
@@ -13,7 +14,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -30,15 +31,20 @@ public class AdminMetricsService {
 
     private final RideRepository rideRepository;
     private final UserStatsService userStatsService;
+    private final CityCatalog cityCatalog;
 
-    public AdminMetricsService(RideRepository rideRepository, UserStatsService userStatsService) {
+    public AdminMetricsService(RideRepository rideRepository, UserStatsService userStatsService,
+                               CityCatalog cityCatalog) {
         this.rideRepository = rideRepository;
         this.userStatsService = userStatsService;
+        this.cityCatalog = cityCatalog;
     }
 
     @Transactional(readOnly = true)
     public AdminMetricsResponse getMetrics(LocalDate from, LocalDate to) {
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        // Painel global: o dia segue o fuso padrao (nao UTC, que jogava a noite no dia seguinte).
+        ZoneId zone = cityCatalog.defaultZone();
+        LocalDate today = LocalDate.now(zone);
         LocalDate effectiveTo = (to != null) ? to : today;
         LocalDate effectiveFrom = (from != null) ? from : effectiveTo.minusDays(DEFAULT_WINDOW_DAYS);
 
@@ -46,8 +52,8 @@ public class AdminMetricsService {
             throw new InvalidMetricsRangeException();
         }
 
-        Instant fromInstant = effectiveFrom.atStartOfDay(ZoneOffset.UTC).toInstant();
-        Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant fromInstant = effectiveFrom.atStartOfDay(zone).toInstant();
+        Instant toInstantExclusive = effectiveTo.plusDays(1).atStartOfDay(zone).toInstant();
 
         RideMetricsAggregate agg = rideRepository.aggregateRideMetrics(fromInstant, toInstantExclusive);
 
@@ -83,7 +89,7 @@ public class AdminMetricsService {
                 u.pendingDrivers(), u.suspendedUsers());
 
         List<MetricsDayItem> byDay = rideRepository
-                .findRideMetricsByDay(fromInstant, toInstantExclusive).stream()
+                .findRideMetricsByDay(fromInstant, toInstantExclusive, zone.getId()).stream()
                 .map(row -> new MetricsDayItem(
                         row.getDay().toLocalDate(),
                         row.getTotal(),

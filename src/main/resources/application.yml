@@ -61,6 +61,9 @@ server:
     use-relative-redirects: true
 
 app:
+  city:
+    # Fuso das visoes globais do admin; cada cidade tem o seu em served_cities.time_zone.
+    default-time-zone: ${APP_DEFAULT_TIME_ZONE:America/Sao_Paulo}
   payment:
     # Pix sem PSP e so simulado (nenhum dinheiro circula). Piloto e so dinheiro:
     # desligado, confirm-payment PIX responde 409. Ligar quando houver PSP real.

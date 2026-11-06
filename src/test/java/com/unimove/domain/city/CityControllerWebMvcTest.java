@@ -87,28 +87,29 @@ class CityControllerWebMvcTest {
     @Test
     @DisplayName("POST /admin/cities devolve 201 quando a cidade é nova")
     void openNewCityReturns201() throws Exception {
-        when(cityCatalogService.open(eq(ADMIN_ID), any())).thenReturn(
+        when(cityCatalogService.open(eq(ADMIN_ID), any(), any())).thenReturn(
                 new CityCatalogService.OpenResult(
-                        new AdminCityItem("casa-nova-ba", "Casa Nova/BA", true, 0L), true));
+                        new AdminCityItem("casa-nova-ba", "Casa Nova/BA", "America/Bahia", true, 0L), true));
 
         mvc.perform(post("/admin/cities")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new OpenCityRequest("Casa Nova/BA"))))
+                        .content(json.writeValueAsString(new OpenCityRequest("Casa Nova/BA", null))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.slug").value("casa-nova-ba"))
+                .andExpect(jsonPath("$.timeZone").value("America/Bahia"))
                 .andExpect(jsonPath("$.active").value(true));
     }
 
     @Test
     @DisplayName("POST /admin/cities devolve 200 quando apenas reativa")
     void reopenCityReturns200() throws Exception {
-        when(cityCatalogService.open(eq(ADMIN_ID), any())).thenReturn(
+        when(cityCatalogService.open(eq(ADMIN_ID), any(), any())).thenReturn(
                 new CityCatalogService.OpenResult(
-                        new AdminCityItem("casa-nova-ba", "Casa Nova/BA", true, 3L), false));
+                        new AdminCityItem("casa-nova-ba", "Casa Nova/BA", "America/Bahia", true, 3L), false));
 
         mvc.perform(post("/admin/cities")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new OpenCityRequest("Casa Nova/BA"))))
+                        .content(json.writeValueAsString(new OpenCityRequest("Casa Nova/BA", null))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userCount").value(3));
     }
@@ -118,7 +119,7 @@ class CityControllerWebMvcTest {
     void openCityRejectsBlankName() throws Exception {
         mvc.perform(post("/admin/cities")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new OpenCityRequest("   "))))
+                        .content(json.writeValueAsString(new OpenCityRequest("   ", null))))
                 .andExpect(status().isBadRequest());
     }
 

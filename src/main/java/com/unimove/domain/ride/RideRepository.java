@@ -280,22 +280,24 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     }
 
     /**
-     * Série diária do painel admin (por created_at): corridas criadas no dia,
+     * Série diária do painel admin (por created_at, dia no fuso {@code tz}): corridas criadas no dia,
      * quantas concluíram e a receita das concluídas. Espelha o estilo nativo de
-     * {@code findDriverEarningsByDay}.
+     * {@code findDriverEarningsByDay}. Agrupa pelo alias {@code day}: repetir a
+     * expressao com o fuso geraria dois binds e o Postgres recusaria o GROUP BY.
      */
     @Query(value = """
-            SELECT CAST(created_at AS DATE) AS day,
+            SELECT CAST((created_at AT TIME ZONE :tz) AS DATE) AS day,
                    COUNT(*) AS total,
                    SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
                    COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN preco ELSE 0 END), 0) AS revenue
             FROM rides
             WHERE created_at >= :from AND created_at < :to
-            GROUP BY CAST(created_at AS DATE)
+            GROUP BY day
             ORDER BY day
             """, nativeQuery = true)
     List<RideMetricsDayRow> findRideMetricsByDay(@Param("from") Instant from,
-                                                 @Param("to") Instant to);
+                                                 @Param("to") Instant to,
+                                                 @Param("tz") String timeZone);
 
     interface EarningsDayRow {
         java.sql.Date getDay();
@@ -335,8 +337,9 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     List<RecentDestinationRow> findRecentDestinations(@Param("passageiroId") UUID passageiroId,
                                                       @Param("limit") int limit);
 
+    /** Ganhos por dia local da cidade ({@code tz}); agrupa pelo alias, como a serie do painel. */
     @Query(value = """
-            SELECT CAST(completed_at AS DATE) AS day,
+            SELECT CAST((completed_at AT TIME ZONE :tz) AS DATE) AS day,
                    COUNT(*) AS rides,
                    COALESCE(SUM(preco), 0) AS gross
             FROM rides
@@ -344,10 +347,11 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
               AND status = 'COMPLETED'
               AND completed_at >= :from
               AND completed_at <  :to
-            GROUP BY CAST(completed_at AS DATE)
+            GROUP BY day
             ORDER BY day
             """, nativeQuery = true)
     List<EarningsDayRow> findDriverEarningsByDay(@Param("driverId") UUID driverId,
                                                  @Param("from") Instant from,
-                                                 @Param("to") Instant to);
+                                                 @Param("to") Instant to,
+                                                 @Param("tz") String timeZone);
 }
